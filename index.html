@@ -352,7 +352,7 @@
 </div>
 
 <iframe id="sc-widget"
-  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=true&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
+  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
   allow="autoplay">
 </iframe>
 
@@ -376,14 +376,13 @@
   let tracks     = [];
   let currentIdx = 0;
   let shuffled   = [];
-  let duration   = 0;
-  let userVolume = 80;   // user's chosen volume, preserved across fades
-  let seekOnPlay = false;
-  let switching  = false; // true while channel crossfade is in progress
+  let userVolume = 80;
+  let switching  = false;
+  let fadeTimer  = null;
 
   const SEEK_MIN = 23 * 60 * 1000;
   const SEEK_MAX = 43 * 60 * 1000;
-  const FADE_MS  = 3000;
+  const FADE_MS  = 2500;
 
   // ── Helpers ──────────────────────────────────────────────
   function shuffle(arr) {
@@ -408,41 +407,61 @@
     document.getElementById('icon-pause').style.display = playing ? '' : 'none';
   }
 
-  // ── Smooth volume fade ───────────────────────────────────
+  // ── Fade: returns a cancellable promise ──────────────────
   function fadeVolume(fromVol, toVol, ms) {
+    if (fadeTimer) { clearInterval(fadeTimer); fadeTimer = null; }
     return new Promise(resolve => {
-      const steps    = 40;
+      const steps    = 50;
       const interval = ms / steps;
-      const delta    = (toVol - fromVol) / steps;
-      let   step     = 0;
-      const timer    = setInterval(() => {
+      // Use easing: ease-in for fade-out, ease-out for fade-in
+      let step = 0;
+      fadeTimer = setInterval(() => {
         step++;
-        widget.setVolume(Math.max(0, Math.min(100, Math.round(fromVol + delta * step))));
-        if (step >= steps) { clearInterval(timer); resolve(); }
+        const t    = step / steps;
+        // Smooth cubic easing
+        const ease = fromVol > toVol ? t * t * t : 1 - Math.pow(1 - t, 3);
+        const vol  = Math.round(fromVol + (toVol - fromVol) * ease);
+        widget.setVolume(Math.max(0, Math.min(100, vol)));
+        if (step >= steps) {
+          clearInterval(fadeTimer);
+          fadeTimer = null;
+          resolve();
+        }
       }, interval);
     });
   }
 
-  // ── Play a track with random seek into 23–43 min ─────────
-  function playTrack(idx) {
-    seekOnPlay = true;
+  // ── Play a track, seeking into 23–43 min range ───────────
+  function playTrack(idx, doSeek = true) {
     widget.skip(shuffled[idx]);
     widget.play();
+    if (doSeek) {
+      // Seek after a short buffer — avoids fighting with the widget's own seek on skip
+      setTimeout(() => {
+        widget.getDuration(d => {
+          if (!d) return;
+          const seekTo = d > SEEK_MAX
+            ? SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN))
+            : Math.floor(d * 0.4);
+          widget.seekTo(seekTo);
+        });
+      }, 600);
+    }
   }
 
-  // ── Channel switch: fade out → clear cache → load → fade in ──
+  // ── Channel switch ───────────────────────────────────────
   async function switchPlaylist(encodedUrl) {
     if (switching) return;
     switching = true;
     document.querySelectorAll('.pl-btn').forEach(b => b.disabled = true);
 
-    // 1. Fade out if playing
+    // 1. Fade out current audio (only if playing)
     if (isPlaying) {
       await fadeVolume(userVolume, 0, FADE_MS);
-      widget.pause();
     }
+    widget.pause();
 
-    // Reset player state
+    // Reset state
     isPlaying = false;
     tracks = []; shuffled = []; currentIdx = 0;
     viz.classList.add('paused');
@@ -450,7 +469,7 @@
     setTitle('—');
     setStatus('switching…');
 
-    // 2. Wipe all PWA/browser caches to prevent stale audio buffering
+    // 2. Clear PWA caches to prevent audio buffering lag
     if ('caches' in window) {
       try {
         const keys = await caches.keys();
@@ -458,55 +477,21 @@
       } catch(e) {}
     }
 
-    // 3. Load new playlist — READY event will fire and handle fade-in
+    // 3. Load new playlist at volume 0, auto_play=true
+    //    The READY handler below will start playback and fade in
+    widget.setVolume(0);
     const params = '&auto_play=true&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false';
     iframe.src = 'https://w.soundcloud.com/player/?url=' + encodedUrl + params;
-
-    // Buttons re-enabled once READY fires (see below)
+    // switching=true signals READY to auto-play + fade in
   }
 
-  // ── Widget events ────────────────────────────────────────
-  widget.bind(SC.Widget.Events.READY, () => {
-    // Restore volume & re-enable buttons after playlist load
-    widget.setVolume(switching ? 0 : userVolume);
-    document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
-
-    widget.getSounds(sounds => {
-      if (!sounds.length) { setStatus('no tracks found'); switching = false; return; }
-      tracks   = sounds;
-      shuffled = shuffle(sounds.map((_, i) => i));
-      setStatus(`${tracks.length} tracks · shuffled`);
-      setTitle(tracks[shuffled[0]].title);
-
-      // Auto-play + fade in after channel switch
-      if (switching) {
-        playTrack(currentIdx);
-      }
-    });
-
+  // ── Register all widget events (called once and after each reload) ──
+  function bindWidgetEvents() {
     widget.bind(SC.Widget.Events.PLAY, () => {
       isPlaying = true;
       viz.classList.remove('paused');
       setPlayIcon(true);
       widget.getCurrentSound(s => { if (s) setTitle(s.title); setStatus(''); });
-
-      if (seekOnPlay) {
-        seekOnPlay = false;
-        widget.getDuration(d => {
-          duration = d;
-          const seekTo = d > SEEK_MAX
-            ? SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN))
-            : Math.floor(d * 0.4);
-          widget.seekTo(seekTo);
-
-          // Fade in after seek completes
-          if (switching) {
-            setTimeout(() => {
-              fadeVolume(0, userVolume, FADE_MS).then(() => { switching = false; });
-            }, 400);
-          }
-        });
-      }
     });
 
     widget.bind(SC.Widget.Events.PAUSE, () => {
@@ -523,6 +508,36 @@
     widget.bind(SC.Widget.Events.ERROR, () => {
       setStatus('stream error — skipping…');
       setTimeout(() => { currentIdx = (currentIdx + 1) % shuffled.length; playTrack(currentIdx); }, 1500);
+    });
+  }
+
+  // ── READY fires on first load and after each iframe src change ──
+  widget.bind(SC.Widget.Events.READY, () => {
+    bindWidgetEvents();
+
+    widget.getSounds(sounds => {
+      if (!sounds.length) { setStatus('no tracks found'); switching = false; return; }
+      tracks   = sounds;
+      shuffled = shuffle(sounds.map((_, i) => i));
+      setTitle(tracks[shuffled[0]].title);
+
+      if (switching) {
+        // Channel switch: widget already auto-playing at vol=0
+        // seek into range, then fade in
+        setStatus('');
+        playTrack(currentIdx);
+        // Fade in after seek settles (seek takes ~600ms, so wait 800ms total)
+        setTimeout(() => {
+          fadeVolume(0, userVolume, FADE_MS).then(() => {
+            switching = false;
+            document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
+          });
+        }, 800);
+      } else {
+        // First page load
+        setStatus(`${tracks.length} tracks · tap play`);
+        widget.setVolume(userVolume);
+      }
     });
   });
 
@@ -545,7 +560,7 @@
       if (!tracks.length) { setStatus('loading…'); return; }
       widget.setVolume(userVolume);
       playTrack(currentIdx);
-      incrementCounter(); // count when user actually presses play
+      incrementCounter();
     }
   });
 
@@ -567,7 +582,7 @@
     if (!switching) widget.setVolume(userVolume);
   });
 
-  // Sync slider when iOS hardware buttons change system volume
+  // Sync slider with iOS hardware volume buttons
   setInterval(() => {
     if (switching) return;
     widget.getVolume(v => {
@@ -580,7 +595,6 @@
   }, 600);
 
   // ── Visit counter (GitHub Gist) ──────────────────────────
-  // IMPORTANT: replace these two values with yours
   const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
   const GH_TOKEN   = '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';
   const GIST_FILE = 'bichradio-counter.json';
@@ -598,7 +612,6 @@
     });
   }
 
-  // Show current count on page load (no increment yet)
   async function loadCounter() {
     try {
       const res  = await gistRequest('GET');
@@ -609,12 +622,11 @@
     } catch(e) {}
   }
 
-  // Increment only when Play is pressed — works across all devices
   async function incrementCounter() {
     if (counted) return;
     counted = true;
     try {
-      const res = await gistRequest('GET');
+      const res      = await gistRequest('GET');
       if (!res.ok) throw new Error();
       const data     = await res.json();
       const current  = JSON.parse(data.files[GIST_FILE].content);
@@ -622,7 +634,7 @@
       document.getElementById('counter-value').textContent = newCount.toLocaleString();
       await gistRequest('PATCH', { files: { [GIST_FILE]: { content: JSON.stringify({ count: newCount }) } } });
     } catch(e) {
-      counted = false; // allow retry on failure
+      counted = false;
     }
   }
 
