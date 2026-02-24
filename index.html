@@ -433,7 +433,18 @@
     document.getElementById('status-msg').textContent = msg;
   }
 
+  // Random seek range: 23–43 minutes in milliseconds
+  const SEEK_MIN = 23 * 60 * 1000;
+  const SEEK_MAX = 43 * 60 * 1000;
+
+  function randomSeek() {
+    return Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN)) + SEEK_MIN;
+  }
+
+  let seekOnPlay = false;
+
   function playTrack(idx) {
+    seekOnPlay = true;
     widget.skip(shuffled[idx]);
     widget.play();
   }
@@ -456,7 +467,15 @@
         if (s) setTitle(s.title);
         setStatus('');
       });
-      widget.getDuration(d => { duration = d; });
+      // Seek to random position in 23–43 min range on initial play
+      if (seekOnPlay) {
+        seekOnPlay = false;
+        widget.getDuration(d => {
+          duration = d;
+          const seekTo = d > SEEK_MAX ? randomSeek() : Math.floor(d * 0.4);
+          widget.seekTo(seekTo);
+        });
+      }
     });
 
     widget.bind(SC.Widget.Events.PAUSE, () => {
@@ -515,9 +534,53 @@
   // Init volume
   widget.bind(SC.Widget.Events.READY, () => widget.setVolume(80));
 
+  // ── iOS hardware volume buttons sync ─────────────────────
+  // Uses Web Audio API to detect system volume changes on iOS
+  (function() {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+      const gainNode = ctx.createGain();
+      gainNode.connect(ctx.destination);
+
+      // Silent oscillator just to keep audio context alive and detect volume
+      const osc = ctx.createOscillator();
+      osc.connect(gainNode);
+      gainNode.gain.value = 0;
+      osc.start();
+
+      // Poll system volume via a silent audio element
+      const silentAudio = document.createElement('audio');
+      silentAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAVFYAAFRWAAABAAgAZGF0YQAAAAA=';
+      silentAudio.loop = true;
+      silentAudio.volume = 1;
+
+      document.addEventListener('touchstart', () => {
+        ctx.resume();
+        silentAudio.play().catch(() => {});
+      }, { once: true });
+
+      // Listen for volume changes via mediaSession or fallback polling
+      if ('mediaSession' in navigator) {
+        // Modern approach: reflect hardware volume to slider
+        let lastVol = 0.8;
+        setInterval(() => {
+          widget.getVolume(v => {
+            const vol = v / 100;
+            if (Math.abs(vol - lastVol) > 0.01) {
+              lastVol = vol;
+              document.getElementById('volume').value = v;
+            }
+          });
+        }, 500);
+      }
+    } catch(e) {}
+  })();
+
   // ── Visit counter via GitHub Gist ─────────────────────────
-  const GIST_ID    = 'REPLACE_WITH_YOUR_GIST_ID';
-  const GH_TOKEN   = 'REPLACE_WITH_YOUR_GITHUB_TOKEN';
+  const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
+  const GH_TOKEN   = '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';
   const GIST_FILE  = 'bichradio-counter.json';
 
   async function incrementCounter() {
