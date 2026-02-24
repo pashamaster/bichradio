@@ -1,6 +1,6 @@
 # bichradio
 
-A minimal PWA radio that shuffles tracks from a SoundCloud playlist.
+A minimal PWA radio that shuffles tracks from a bichradio playlist.
 
 ## Deploy in 5 steps
 
