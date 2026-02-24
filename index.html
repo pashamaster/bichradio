@@ -283,7 +283,25 @@
       text-align: center;
     }
 
-    @keyframes fadein {
+    .counter-wrap {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 4px;
+    }
+
+    .counter-label {
+      font-size: 0.55rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: rgba(232,226,217,0.2);
+    }
+
+    .counter-value {
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      color: rgba(232,226,217,0.35);
+    }
       from { opacity: 0; transform: translateY(6px); }
       to { opacity: 1; transform: translateY(0); }
     }
@@ -336,6 +354,11 @@
       <svg class="volume-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM16.5 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
     </div>
     <div class="loading-msg" id="status-msg">tap play to start</div>
+    <div class="counter-wrap">
+      <span class="counter-label">tuned in</span>
+      <span class="counter-value" id="counter-value">—</span>
+      <span class="counter-label">times</span>
+    </div>
   </div>
 </div>
 
@@ -491,6 +514,48 @@
 
   // Init volume
   widget.bind(SC.Widget.Events.READY, () => widget.setVolume(80));
+
+  // ── Visit counter via GitHub Gist ─────────────────────────
+  const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
+  const GH_TOKEN   = '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';
+  const GIST_FILE  = 'bichradio-counter.json';
+
+  async function incrementCounter() {
+    try {
+      // 1. Read current value
+      const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+        headers: {
+          'Authorization': `Bearer ${GH_TOKEN}`,
+          'Accept': 'application/vnd.github+json'
+        }
+      });
+      const data = await res.json();
+      const current = JSON.parse(data.files[GIST_FILE].content);
+      const newCount = (current.count || 0) + 1;
+
+      // 2. Display immediately
+      document.getElementById('counter-value').textContent = newCount.toLocaleString();
+
+      // 3. Write new value back
+      await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${GH_TOKEN}`,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          files: {
+            [GIST_FILE]: { content: JSON.stringify({ count: newCount }) }
+          }
+        })
+      });
+    } catch (e) {
+      document.getElementById('counter-value').textContent = '—';
+    }
+  }
+
+  incrementCounter();
 
   // Register service worker for PWA
   if ('serviceWorker' in navigator) {
