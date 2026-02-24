@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="bichradio" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <title>bichradio</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500&family=Playfair+Display:ital@0;1&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #111111;
+      --border: rgba(255,255,255,0.07);
+      --text: #e8e2d9;
+      --muted: rgba(232,226,217,0.35);
+      --accent: #c8a96e;
+      --red: #e05252;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Geist Mono', monospace;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Grain overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+      opacity: 0.028;
+      pointer-events: none;
+      z-index: 1000;
+    }
+
+    .app {
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0);
+    }
+
+    /* TOP BAR */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 28px 28px 0;
+    }
+
+    .logo {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 1.1rem;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+    }
+
+    .live-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.6rem;
+      letter-spacing: 0.18em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 8px var(--red);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--red); }
+      50% { opacity: 0.4; box-shadow: 0 0 2px var(--red); }
+    }
+
+    /* CENTER */
+    .center {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 0 28px;
+      gap: 40px;
+    }
+
+    /* Visualizer */
+    .visualizer {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 48px;
+      opacity: 0.5;
+    }
+
+    .bar {
+      width: 3px;
+      border-radius: 2px;
+      background: var(--accent);
+      animation: bounce var(--d) ease-in-out infinite alternate;
+      transform-origin: bottom;
+    }
+
+    @keyframes bounce {
+      from { transform: scaleY(0.1); }
+      to { transform: scaleY(1); }
+    }
+
+    .visualizer.paused .bar { animation-play-state: paused; transform: scaleY(0.1); }
+
+    /* Track info */
+    .track-info {
+      text-align: center;
+      max-width: 320px;
+      width: 100%;
+    }
+
+    .track-label {
+      font-size: 0.55rem;
+      letter-spacing: 0.22em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    .track-title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.2rem, 5vw, 1.7rem);
+      line-height: 1.35;
+      color: var(--text);
+      min-height: 2.7em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.4s ease;
+    }
+
+    .track-title.fading { opacity: 0; }
+
+    /* Progress */
+    .progress-wrap {
+      width: 100%;
+      max-width: 320px;
+    }
+
+    .progress-bar-bg {
+      height: 1px;
+      background: var(--border);
+      position: relative;
+      border-radius: 1px;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 1px;
+      width: 0%;
+    }
+
+    .progress-times {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.6rem;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    /* CONTROLS */
+    .controls {
+      padding: 0 28px 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .main-controls {
+      display: flex;
+      align-items: center;
+      gap: 36px;
+    }
+
+    .btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+      transition: color 0.2s, transform 0.15s;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .btn:hover { color: var(--text); transform: scale(1.1); }
+    .btn:active { transform: scale(0.95); }
+
+    .btn-play {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      border: 1px solid var(--border) !important;
+      background: var(--surface) !important;
+      color: var(--text);
+      transition: all 0.2s;
+    }
+
+    .btn-play:hover {
+      border-color: var(--accent) !important;
+      color: var(--accent);
+      transform: scale(1.05);
+    }
+
+    /* Volume */
+    .volume-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      max-width: 280px;
+    }
+
+    .volume-icon { color: var(--muted); flex-shrink: 0; }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+      outline: none;
+      border-radius: 1px;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+
+    /* SoundCloud iframe hidden */
+    #sc-widget {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+      bottom: 0; left: 0;
+    }
+
+    /* Loading state */
+    .loading-msg {
+      font-size: 0.65rem;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    @keyframes fadein {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .app { animation: fadein 0.8s ease both; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">bichradio</div>
+    <div class="live-badge">
+      <div class="live-dot"></div>
+      <span>on air</span>
+    </div>
+  </header>
+
+  <div class="center">
+    <div class="visualizer paused" id="visualizer">
+      <!-- bars generated by JS -->
+    </div>
+
+    <div class="track-info">
+      <div class="track-label">now playing</div>
+      <div class="track-title" id="track-title">—</div>
+    </div>
+
+    <div class="progress-wrap">
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progress-fill"></div>
+      </div>
+      <div class="progress-times">
+        <span id="time-current">0:00</span>
+        <span id="time-total">0:00</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="main-controls">
+      <button class="btn" id="btn-prev" title="Previous">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+      </button>
+      <button class="btn btn-play" id="btn-play" title="Play/Pause">
+        <svg id="icon-play" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="icon-pause" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      </button>
+      <button class="btn" id="btn-next" title="Next">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2-8.14 5.25 3.64L8 16.14V9.86zM16 6h2v12h-2z"/></svg>
+      </button>
+    </div>
+    <div class="volume-row">
+      <svg class="volume-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+      <input type="range" id="volume" min="0" max="100" value="80" />
+      <svg class="volume-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM16.5 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+    </div>
+    <div class="loading-msg" id="status-msg">tap play to start</div>
+  </div>
+</div>
+
+<!-- Hidden SoundCloud Widget -->
+<!-- ⚠️  REPLACE THE URL BELOW WITH YOUR SOUNDCLOUD PLAYLIST URL -->
+<iframe id="sc-widget"
+  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
+  allow="autoplay">
+</iframe>
+
+<script src="https://w.soundcloud.com/player/api.js"></script>
+<script>
+  // ── Visualizer bars ──────────────────────────────────────
+  const viz = document.getElementById('visualizer');
+  const NUM_BARS = 22;
+  for (let i = 0; i < NUM_BARS; i++) {
+    const b = document.createElement('div');
+    b.className = 'bar';
+    const dur = (0.4 + Math.random() * 0.7).toFixed(2);
+    const h = 8 + Math.floor(Math.random() * 40);
+    b.style.cssText = `--d:${dur}s; height:${h}px;`;
+    viz.appendChild(b);
+  }
+
+  // ── SoundCloud Widget ────────────────────────────────────
+  const iframe = document.getElementById('sc-widget');
+  const widget = SC.Widget(iframe);
+
+  let isPlaying = false;
+  let tracks = [];
+  let currentIdx = 0;
+  let shuffled = [];
+  let duration = 0;
+
+  function shuffle(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  function formatTime(ms) {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    return `${m}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  function setTitle(title) {
+    const el = document.getElementById('track-title');
+    el.classList.add('fading');
+    setTimeout(() => {
+      el.textContent = title || '—';
+      el.classList.remove('fading');
+    }, 400);
+  }
+
+  function setStatus(msg) {
+    document.getElementById('status-msg').textContent = msg;
+  }
+
+  function playTrack(idx) {
+    widget.skip(shuffled[idx]);
+    widget.play();
+  }
+
+  widget.bind(SC.Widget.Events.READY, () => {
+    widget.getSounds((sounds) => {
+      if (!sounds.length) { setStatus('no tracks found — check playlist URL'); return; }
+      tracks = sounds;
+      shuffled = shuffle(sounds.map((_, i) => i));
+      setStatus(`${tracks.length} tracks · shuffled`);
+      setTitle(tracks[shuffled[0]].title);
+    });
+
+    widget.bind(SC.Widget.Events.PLAY, () => {
+      isPlaying = true;
+      viz.classList.remove('paused');
+      document.getElementById('icon-play').style.display = 'none';
+      document.getElementById('icon-pause').style.display = '';
+      widget.getCurrentSound(s => {
+        if (s) setTitle(s.title);
+        setStatus('');
+      });
+      widget.getDuration(d => { duration = d; document.getElementById('time-total').textContent = formatTime(d); });
+    });
+
+    widget.bind(SC.Widget.Events.PAUSE, () => {
+      isPlaying = false;
+      viz.classList.add('paused');
+      document.getElementById('icon-play').style.display = '';
+      document.getElementById('icon-pause').style.display = 'none';
+    });
+
+    widget.bind(SC.Widget.Events.PLAY_PROGRESS, (e) => {
+      const pct = (e.relativePosition * 100).toFixed(2);
+      document.getElementById('progress-fill').style.width = pct + '%';
+      document.getElementById('time-current').textContent = formatTime(e.currentPosition);
+    });
+
+    widget.bind(SC.Widget.Events.FINISH, () => {
+      currentIdx = (currentIdx + 1) % shuffled.length;
+      playTrack(currentIdx);
+    });
+
+    widget.bind(SC.Widget.Events.ERROR, () => {
+      setStatus('stream error — skipping…');
+      setTimeout(() => {
+        currentIdx = (currentIdx + 1) % shuffled.length;
+        playTrack(currentIdx);
+      }, 1500);
+    });
+  });
+
+  // ── Controls ─────────────────────────────────────────────
+  document.getElementById('btn-play').addEventListener('click', () => {
+    if (isPlaying) { widget.pause(); }
+    else {
+      if (!tracks.length) { setStatus('loading…'); return; }
+      playTrack(currentIdx);
+    }
+  });
+
+  document.getElementById('btn-next').addEventListener('click', () => {
+    currentIdx = (currentIdx + 1) % shuffled.length;
+    playTrack(currentIdx);
+  });
+
+  document.getElementById('btn-prev').addEventListener('click', () => {
+    currentIdx = (currentIdx - 1 + shuffled.length) % shuffled.length;
+    playTrack(currentIdx);
+  });
+
+  document.getElementById('volume').addEventListener('input', (e) => {
+    widget.setVolume(e.target.value);
+  });
+
+  // Init volume
+  widget.bind(SC.Widget.Events.READY, () => widget.setVolume(80));
+
+  // Register service worker for PWA
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(console.warn);
+  }
+</script>
+</body>
+</html>
