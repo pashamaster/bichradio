@@ -365,7 +365,7 @@
 <!-- Hidden SoundCloud Widget -->
 <!-- ⚠️  REPLACE THE URL BELOW WITH YOUR SOUNDCLOUD PLAYLIST URL -->
 <iframe id="sc-widget"
-  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
+  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=true&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
   allow="autoplay">
 </iframe>
 
@@ -410,7 +410,7 @@
 
   function loadPlaylist(encodedUrl) {
     const base = 'https://w.soundcloud.com/player/?url=';
-    const params = '&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false';
+    const params = '&auto_play=true&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false';
     iframe.src = base + encodedUrl + params;
     tracks = []; shuffled = []; currentIdx = 0; isPlaying = false;
     viz.classList.add('paused');
