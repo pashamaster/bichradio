@@ -158,32 +158,35 @@
 
     .track-title.fading { opacity: 0; }
 
-    /* Progress */
-    .progress-wrap {
-      width: 100%;
-      max-width: 320px;
-    }
-
-    .progress-bar-bg {
-      height: 1px;
-      background: var(--border);
-      position: relative;
-      border-radius: 1px;
-    }
-
-    .progress-bar-fill {
-      height: 100%;
-      background: var(--accent);
-      border-radius: 1px;
-      width: 0%;
-    }
-
-    .progress-times {
+    /* Playlist buttons */
+    .playlist-btns {
       display: flex;
-      justify-content: space-between;
-      font-size: 0.6rem;
+      gap: 12px;
+    }
+
+    .pl-btn {
+      font-family: 'Geist Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      background: none;
+      border: 1px solid var(--border);
       color: var(--muted);
-      margin-top: 8px;
+      padding: 8px 22px;
+      border-radius: 2px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .pl-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .pl-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(200,169,110,0.07);
     }
 
     /* CONTROLS */
@@ -308,14 +311,9 @@
       <div class="track-title" id="track-title">—</div>
     </div>
 
-    <div class="progress-wrap">
-      <div class="progress-bar-bg">
-        <div class="progress-bar-fill" id="progress-fill"></div>
-      </div>
-      <div class="progress-times">
-        <span id="time-current">0:00</span>
-        <span id="time-total">0:00</span>
-      </div>
+    <div class="playlist-btns">
+      <button class="pl-btn" id="btn-class" data-playlist="https%3A//soundcloud.com/pavel-masterov/sets/class">class</button>
+      <button class="pl-btn active" id="btn-sexy" data-playlist="https%3A//soundcloud.com/pavel-masterov/sets/sexy">sexy</button>
     </div>
   </div>
 
@@ -344,7 +342,7 @@
 <!-- Hidden SoundCloud Widget -->
 <!-- ⚠️  REPLACE THE URL BELOW WITH YOUR SOUNDCLOUD PLAYLIST URL -->
 <iframe id="sc-widget"
-  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=true&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
+  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
   allow="autoplay">
 </iframe>
 
@@ -387,6 +385,18 @@
     return `${m}:${String(s % 60).padStart(2, '0')}`;
   }
 
+  function loadPlaylist(encodedUrl) {
+    const base = 'https://w.soundcloud.com/player/?url=';
+    const params = '&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false';
+    iframe.src = base + encodedUrl + params;
+    tracks = []; shuffled = []; currentIdx = 0; isPlaying = false;
+    viz.classList.add('paused');
+    document.getElementById('icon-play').style.display = '';
+    document.getElementById('icon-pause').style.display = 'none';
+    setTitle('—');
+    setStatus('loading…');
+  }
+
   function setTitle(title) {
     const el = document.getElementById('track-title');
     el.classList.add('fading');
@@ -423,7 +433,7 @@
         if (s) setTitle(s.title);
         setStatus('');
       });
-      widget.getDuration(d => { duration = d; document.getElementById('time-total').textContent = formatTime(d); });
+      widget.getDuration(d => { duration = d; });
     });
 
     widget.bind(SC.Widget.Events.PAUSE, () => {
@@ -431,12 +441,6 @@
       viz.classList.add('paused');
       document.getElementById('icon-play').style.display = '';
       document.getElementById('icon-pause').style.display = 'none';
-    });
-
-    widget.bind(SC.Widget.Events.PLAY_PROGRESS, (e) => {
-      const pct = (e.relativePosition * 100).toFixed(2);
-      document.getElementById('progress-fill').style.width = pct + '%';
-      document.getElementById('time-current').textContent = formatTime(e.currentPosition);
     });
 
     widget.bind(SC.Widget.Events.FINISH, () => {
@@ -450,6 +454,15 @@
         currentIdx = (currentIdx + 1) % shuffled.length;
         playTrack(currentIdx);
       }, 1500);
+    });
+  });
+
+  // ── Playlist switcher ─────────────────────────────────────
+  document.querySelectorAll('.pl-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.pl-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadPlaylist(btn.dataset.playlist);
     });
   });
 
