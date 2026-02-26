@@ -256,7 +256,7 @@
       cursor: pointer;
     }
 
-    #sc-widget {
+    #sc-widget-sexy, #sc-widget-class {
       position: absolute;
       width: 1px;
       height: 1px;
@@ -351,8 +351,12 @@
   </div>
 </div>
 
-<iframe id="sc-widget"
+<iframe id="sc-widget-sexy"
   src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
+  allow="autoplay">
+</iframe>
+<iframe id="sc-widget-class"
+  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/class&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
   allow="autoplay">
 </iframe>
 
@@ -367,95 +371,34 @@
     viz.appendChild(b);
   }
 
-  // ── Core refs ────────────────────────────────────────────
-  const iframe    = document.getElementById('sc-widget');
-  const widget    = SC.Widget(iframe);
+  // ── Two widgets, both pre-loaded silently ────────────────
+  const channels = {
+    sexy:  { id: 'sexy',  iframe: document.getElementById('sc-widget-sexy'),  widget: null, tracks: [], shuffled: [], ready: false },
+    class: { id: 'class', iframe: document.getElementById('sc-widget-class'), widget: null, tracks: [], shuffled: [], ready: false }
+  };
+  channels.sexy.widget  = SC.Widget(channels.sexy.iframe);
+  channels.class.widget = SC.Widget(channels.class.iframe);
+
   const volSlider = document.getElementById('volume');
 
   // ── State ────────────────────────────────────────────────
-  let isPlaying   = false;
-  let tracks      = [];
-  let shuffled    = [];
-  let currentIdx  = 0;
-  let userVolume  = 80;   // 0–100, the user's chosen level
-  let switching   = false;
-  let playRetry   = null; // retry interval handle
-  let gainNode    = null; // Web Audio GainNode — used for smooth fading
-  let audioCtx    = null;
+  let activeId   = 'sexy';
+  let isPlaying  = false;
+  let currentIdx = 0;
+  let userVolume = 80;
+  let switching  = false;
+  let playRetry  = null;
+  let didSeek    = false;
 
-  const SEEK_MIN  = 23 * 60 * 1000;
-  const SEEK_MAX  = 43 * 60 * 1000;
-  const FADE_SECS = 2.5; // seconds for fade in/out
-
-  // ── Web Audio setup ──────────────────────────────────────
-  // We route the iframe's audio through a GainNode so we can
-  // do frame-accurate, lag-free fades without postMessage queuing.
-  function setupAudioContext() {
-    try {
-      if (audioCtx) return;
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      audioCtx = new AC();
-      gainNode = audioCtx.createGain();
-      gainNode.gain.value = userVolume / 100;
-      gainNode.connect(audioCtx.destination);
-
-      // Find the <audio> element inside the iframe and route it
-      const tryConnect = () => {
-        try {
-          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-          const audio = iframeDoc.querySelector('audio');
-          if (audio) {
-            const src = audioCtx.createMediaElementSource(audio);
-            src.connect(gainNode);
-            // Now we control volume via gainNode, not widget.setVolume
-            widget.setVolume(100); // keep widget at max; we control gain
-          }
-        } catch(e) {
-          // Cross-origin: can't access iframe DOM — fall back to widget.setVolume
-          gainNode = null;
-          audioCtx = null;
-        }
-      };
-
-      iframe.addEventListener('load', tryConnect);
-      setTimeout(tryConnect, 2000);
-    } catch(e) {}
-  }
-
-  // ── Fade via GainNode (frame-perfect) or fallback ────────
-  function fadeGain(fromVal, toVal, secs, onDone) {
-    if (gainNode && audioCtx) {
-      audioCtx.resume();
-      const now = audioCtx.currentTime;
-      gainNode.gain.cancelScheduledValues(now);
-      gainNode.gain.setValueAtTime(fromVal / 100, now);
-      // Exponential ramp sounds more natural than linear
-      // (can't ramp to 0, so use 0.001 as "silence")
-      const target = toVal <= 0 ? 0.001 : toVal / 100;
-      gainNode.gain.exponentialRampToValueAtTime(target, now + secs);
-      if (toVal <= 0) {
-        // After ramp, hard-set to 0
-        gainNode.gain.setValueAtTime(0, now + secs);
-      }
-      setTimeout(onDone, secs * 1000 + 50);
-    } else {
-      // Fallback: postMessage-based with reduced step count to avoid queue backlog
-      const steps    = 20; // fewer steps = less queue buildup
-      const interval = (secs * 1000) / steps;
-      let step = 0;
-      const timer = setInterval(() => {
-        step++;
-        const t    = step / steps;
-        const ease = fromVal > toVal ? t * t : 1 - (1 - t) * (1 - t);
-        const vol  = Math.round(fromVal + (toVal - fromVal) * ease);
-        widget.setVolume(Math.max(0, Math.min(100, vol)));
-        if (step >= steps) { clearInterval(timer); onDone(); }
-      }, interval);
-    }
-  }
+  const SEEK_MIN   = 23 * 60 * 1000;
+  const SEEK_MAX   = 43 * 60 * 1000;
+  const FADE_MS    = 1800;
+  const FADE_STEPS = 25;
 
   // ── Helpers ──────────────────────────────────────────────
+  function active()   { return channels[activeId]; }
+  function inactive() { return channels[activeId === 'sexy' ? 'class' : 'sexy']; }
+
   function shuffle(arr) {
     const a = [...arr];
     for (let i = a.length - 1; i > 0; i--) {
@@ -478,254 +421,241 @@
     document.getElementById('icon-pause').style.display = playing ? '' : 'none';
   }
 
-  function applyVolume() {
-    if (gainNode && audioCtx) {
-      gainNode.gain.cancelScheduledValues(audioCtx.currentTime);
-      gainNode.gain.setValueAtTime(userVolume / 100, audioCtx.currentTime);
-    } else {
-      widget.setVolume(userVolume);
-    }
+  // ── Smooth volume fade on a specific widget ───────────────
+  function fadeWidget(w, fromVol, toVol, ms, onDone) {
+    let step = 0;
+    const interval = ms / FADE_STEPS;
+    const timer = setInterval(() => {
+      step++;
+      const t    = step / FADE_STEPS;
+      const ease = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2; // ease-in-out cubic
+      const vol  = Math.round(fromVol + (toVol - fromVol) * ease);
+      w.setVolume(Math.max(0, Math.min(100, vol)));
+      if (step >= FADE_STEPS) { clearInterval(timer); if (onDone) onDone(); }
+    }, interval);
+    return timer;
+  }
+
+  // ── Seek once per track into 23–43 min range ─────────────
+  function doSeek(w) {
+    if (didSeek) return;
+    didSeek = true;
+    w.getDuration(d => {
+      if (!d || d < 60000) return;
+      const seekTo = d > SEEK_MAX
+        ? SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN))
+        : Math.floor(d * 0.4);
+      w.seekTo(seekTo);
+    });
   }
 
   // ── Reliable play with retry ─────────────────────────────
-  // widget.play() can silently fail. We verify playback started
-  // and retry every 800ms until confirmed or timeout (5s).
-  function reliablePlay(onConfirmed) {
+  function reliablePlay(w, onConfirmed) {
     clearInterval(playRetry);
     let attempts = 0;
-    const maxAttempts = 6;
-
     const attempt = () => {
       if (isPlaying) { clearInterval(playRetry); playRetry = null; if (onConfirmed) onConfirmed(); return; }
-      if (attempts >= maxAttempts) { clearInterval(playRetry); playRetry = null; setStatus('tap play to start'); return; }
+      if (attempts >= 6) { clearInterval(playRetry); playRetry = null; setStatus('tap play to retry'); return; }
       attempts++;
-      widget.play();
+      w.play();
     };
-
     attempt();
     playRetry = setInterval(attempt, 800);
   }
 
-  // ── Seek into 23–43 min range ────────────────────────────
-  function doSeek() {
-    widget.getDuration(d => {
-      if (!d) return;
-      const seekTo = d > SEEK_MAX
-        ? SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN))
-        : Math.floor(d * 0.4);
-      widget.seekTo(seekTo);
-    });
-  }
-
-  // ── Play a track ─────────────────────────────────────────
+  // ── Play a track on the active channel ───────────────────
   function playTrack(idx) {
+    didSeek = false;
     clearInterval(playRetry);
-    widget.skip(shuffled[idx]);
-    // Seek happens after PLAY event fires (track is ready)
-    reliablePlay();
+    const ch = active();
+    ch.widget.skip(ch.shuffled[idx]);
+    ch.widget.setVolume(userVolume);
+    reliablePlay(ch.widget);
   }
 
-  // ── Channel switch ───────────────────────────────────────
-  // Key insight: we do the fade BEFORE the user gesture window expires.
-  // The gesture is the button click. We must call iframe.src= synchronously
-  // or very quickly. So: start fade, but also immediately swap the src.
-  // The fade runs over the old audio while the new playlist loads.
-  function switchPlaylist(encodedUrl) {
-    if (switching) return;
-    switching = true;
-    clearInterval(playRetry);
-    document.querySelectorAll('.pl-btn').forEach(b => b.disabled = true);
-    setStatus('switching…');
+  // ── Bind events for one channel widget ───────────────────
+  function bindChannel(ch) {
+    ch.widget.bind(SC.Widget.Events.READY, () => {
+      ch.widget.getSounds(sounds => {
+        if (!sounds.length) return;
+        ch.tracks   = sounds;
+        ch.shuffled = shuffle(sounds.map((_, i) => i));
+        ch.ready    = true;
+        // Keep inactive channel silenced
+        if (ch.id !== activeId) ch.widget.setVolume(0);
+      });
+    });
 
-    const wasPlaying = isPlaying;
-
-    // Start fade-out immediately (runs in parallel with iframe load)
-    if (wasPlaying && gainNode) {
-      fadeGain(userVolume, 0, FADE_SECS, () => {});
-    } else if (wasPlaying) {
-      fadeGain(userVolume, 0, FADE_SECS, () => {});
-    }
-
-    // Also immediately swap iframe — browser needs the gesture context NOW
-    // We set volume=0 so there's no audio pop when it starts
-    widget.setVolume(0);
-    if (gainNode && audioCtx) {
-      gainNode.gain.cancelScheduledValues(audioCtx.currentTime);
-      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-    }
-
-    // Clear only the audio cache via SW message (preserves shell cache)
-    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage('CLEAR_AUDIO_CACHE');
-    } else if ('caches' in window) {
-      caches.delete('bichradio-audio-v2').catch(() => {});
-    }
-
-    // Swap iframe src immediately to preserve gesture context
-    const params = '&auto_play=true&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false';
-    iframe.src = 'https://w.soundcloud.com/player/?url=' + encodedUrl + params;
-
-    // Reset display state
-    isPlaying = false;
-    tracks = []; shuffled = []; currentIdx = 0;
-    viz.classList.add('paused');
-    setPlayIcon(false);
-    setTitle('—');
-    // READY will handle the rest
-  }
-
-  // ── Widget events ────────────────────────────────────────
-  let eventsRegistered = false;
-
-  function bindEvents() {
-    if (eventsRegistered) return;
-    eventsRegistered = true;
-
-    widget.bind(SC.Widget.Events.PLAY, () => {
+    ch.widget.bind(SC.Widget.Events.PLAY, () => {
+      if (ch.id !== activeId) {
+        // Inactive channel fired — silence and pause it immediately
+        ch.widget.setVolume(0);
+        ch.widget.pause();
+        return;
+      }
       if (!isPlaying) {
         isPlaying = true;
         viz.classList.remove('paused');
         setPlayIcon(true);
-        widget.getCurrentSound(s => { if (s) setTitle(s.title); });
+        ch.widget.getCurrentSound(s => { if (s) setTitle(s.title); });
         setStatus('');
-        // Seek into range on first play of a track
-        setTimeout(doSeek, 300);
-        // Count this session — fires the moment audio actually starts
+        setTimeout(() => doSeek(ch.widget), 400);
         incrementCounter();
       }
-    });
-
-    widget.bind(SC.Widget.Events.PAUSE, () => {
-      // Only mark as paused if not in the middle of a switch
-      if (!switching) {
-        isPlaying = false;
-        viz.classList.add('paused');
-        setPlayIcon(false);
+      // If this PLAY is from a channel switch, fade in
+      if (switching) {
+        fadeWidget(ch.widget, 0, userVolume, FADE_MS, () => {
+          switching = false;
+          document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
+        });
       }
     });
 
-    widget.bind(SC.Widget.Events.FINISH, () => {
+    ch.widget.bind(SC.Widget.Events.PAUSE, () => {
+      if (ch.id !== activeId || switching) return;
       isPlaying = false;
-      currentIdx = (currentIdx + 1) % shuffled.length;
+      viz.classList.add('paused');
+      setPlayIcon(false);
+    });
+
+    ch.widget.bind(SC.Widget.Events.FINISH, () => {
+      if (ch.id !== activeId) return;
+      isPlaying = false;
+      currentIdx = (currentIdx + 1) % ch.shuffled.length;
       playTrack(currentIdx);
     });
 
-    widget.bind(SC.Widget.Events.ERROR, () => {
+    ch.widget.bind(SC.Widget.Events.ERROR, () => {
+      if (ch.id !== activeId) return;
       isPlaying = false;
       setStatus('stream error — skipping…');
-      setTimeout(() => { currentIdx = (currentIdx + 1) % shuffled.length; playTrack(currentIdx); }, 1000);
+      setTimeout(() => { currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); }, 800);
     });
   }
 
-  // ── READY ────────────────────────────────────────────────
-  widget.bind(SC.Widget.Events.READY, () => {
-    bindEvents();
-    setupAudioContext();
+  bindChannel(channels.sexy);
+  bindChannel(channels.class);
 
-    widget.getSounds(sounds => {
-      if (!sounds.length) { setStatus('no tracks found'); switching = false; document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false); return; }
-      tracks   = sounds;
-      shuffled = shuffle(sounds.map((_, i) => i));
+  // ── Channel switch — no iframe reload, near-instant ───────
+  function switchChannel(toId) {
+    if (switching || toId === activeId) return;
+    switching = true;
+    clearInterval(playRetry);
+    document.querySelectorAll('.pl-btn').forEach(b => b.disabled = true);
 
-      if (switching) {
-        // New playlist loaded — it's already auto-playing at gain=0
-        // Wait for PLAY event to confirm, then fade in
-        setTitle(tracks[shuffled[0]].title);
-        setStatus('');
+    const from = active();
+    const to   = channels[toId];
 
-        // Wait for play to confirm (via PLAY event or timeout) then fade in
-        const waitForPlay = setInterval(() => {
-          if (isPlaying) {
-            clearInterval(waitForPlay);
-            // Fade in
-            fadeGain(0, userVolume, FADE_SECS, () => {
-              switching = false;
-              document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
-            });
-          }
-        }, 200);
+    const startSwitch = () => {
+      // Pre-silence incoming, set activeId so events route correctly
+      to.widget.setVolume(0);
+      activeId   = toId;
+      currentIdx = 0;
+      didSeek    = false;
+      isPlaying  = false;
 
-        // Safety timeout: if play didn't start in 4s, retry
-        setTimeout(() => {
-          clearInterval(waitForPlay);
-          if (!isPlaying) {
-            widget.play();
-            setTimeout(() => {
-              fadeGain(0, userVolume, FADE_SECS, () => {
-                switching = false;
-                document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
-              });
-            }, 500);
-          }
-        }, 4000);
+      // Fade out old channel (short — 1s) while new one starts
+      fadeWidget(from.widget, userVolume, 0, 1000, () => {
+        from.widget.pause();
+        from.widget.setVolume(0);
+      });
 
-      } else {
-        // Initial page load
-        setTitle(tracks[shuffled[0]].title);
-        setStatus(`${tracks.length} tracks · tap play`);
-        applyVolume();
-      }
-    });
-  });
+      // Start new channel immediately (will fade in via PLAY event handler)
+      to.widget.skip(to.shuffled[currentIdx]);
+      reliablePlay(to.widget);
+
+      setTitle(to.tracks[to.shuffled[currentIdx]]?.title || '—');
+      setStatus('');
+      viz.classList.add('paused');
+      setPlayIcon(false);
+
+      // Safety release after 6s if something went wrong
+      setTimeout(() => {
+        if (switching) {
+          switching = false;
+          document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
+          if (!isPlaying) to.widget.setVolume(userVolume);
+        }
+      }, 6000);
+    };
+
+    if (to.ready) {
+      startSwitch();
+    } else {
+      setStatus('loading channel…');
+      let waited = 0;
+      const wait = setInterval(() => {
+        waited += 250;
+        if (to.ready) { clearInterval(wait); startSwitch(); }
+        else if (waited > 6000) {
+          clearInterval(wait);
+          switching = false;
+          document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
+          setStatus('channel not ready — try again');
+        }
+      }, 250);
+    }
+  }
 
   // ── Playlist buttons ─────────────────────────────────────
   document.querySelectorAll('.pl-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      if (btn.classList.contains('active') || switching) return;
+      const toId = btn.id === 'btn-sexy' ? 'sexy' : 'class';
+      if (toId === activeId || switching) return;
       document.querySelectorAll('.pl-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      switchPlaylist(btn.dataset.playlist);
+      switchChannel(toId);
     });
   });
 
-  // ── Play / Pause button ───────────────────────────────────
+  // ── Play / Pause ─────────────────────────────────────────
   document.getElementById('btn-play').addEventListener('click', () => {
     if (switching) return;
-    if (audioCtx) audioCtx.resume();
+    const ch = active();
     if (isPlaying) {
       clearInterval(playRetry);
-      widget.pause();
+      ch.widget.pause();
     } else {
-      if (!tracks.length) { setStatus('loading…'); return; }
-      applyVolume();
+      if (!ch.ready) { setStatus('loading…'); return; }
+      ch.widget.setVolume(userVolume);
       playTrack(currentIdx);
     }
   });
 
   document.getElementById('btn-next').addEventListener('click', () => {
     if (switching) return;
-    currentIdx = (currentIdx + 1) % shuffled.length;
+    const ch = active();
+    currentIdx = (currentIdx + 1) % ch.shuffled.length;
     playTrack(currentIdx);
   });
 
   document.getElementById('btn-prev').addEventListener('click', () => {
     if (switching) return;
-    currentIdx = (currentIdx - 1 + shuffled.length) % shuffled.length;
+    const ch = active();
+    currentIdx = (currentIdx - 1 + ch.shuffled.length) % ch.shuffled.length;
     playTrack(currentIdx);
   });
 
-  // ── Volume slider ────────────────────────────────────────
+  // ── Volume ───────────────────────────────────────────────
   volSlider.addEventListener('input', e => {
     userVolume = parseInt(e.target.value);
-    if (!switching) applyVolume();
+    if (!switching) active().widget.setVolume(userVolume);
   });
 
-  // Sync slider with iOS hardware volume buttons
   setInterval(() => {
-    if (switching || gainNode) return; // gainNode = we control volume ourselves
-    widget.getVolume(v => {
+    if (switching) return;
+    active().widget.getVolume(v => {
       const r = Math.round(v);
       if (Math.abs(r - userVolume) > 2) { userVolume = r; volSlider.value = r; }
     });
   }, 700);
 
   // ── Visit counter (GitHub Gist) ──────────────────────────
-  // Counts once per session when playback actually starts (PLAY event fires)
  const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
   const GH_TOKEN   = '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';
   const GIST_FILE = 'bichradio-counter.json';
   let counted     = false;
-  let countQueued = false; // prevents race if PLAY fires twice quickly
+  let countQueued = false;
 
   async function gistRequest(method, body) {
     return fetch(`https://api.github.com/gists/${GIST_ID}`, {
@@ -753,25 +683,18 @@
     if (counted || countQueued) return;
     countQueued = true;
     try {
-      // Read current value
-      const res = await gistRequest('GET');
-      if (!res.ok) throw new Error('read failed');
+      const res      = await gistRequest('GET');
+      if (!res.ok) throw new Error();
       const data     = await res.json();
       const current  = JSON.parse(data.files[GIST_FILE].content);
       const newCount = (current.count || 0) + 1;
-
-      // Write new value
       const writeRes = await gistRequest('PATCH', {
         files: { [GIST_FILE]: { content: JSON.stringify({ count: newCount }) } }
       });
-      if (!writeRes.ok) throw new Error('write failed');
-
-      // Only mark as counted after confirmed write
+      if (!writeRes.ok) throw new Error();
       counted = true;
       document.getElementById('counter-value').textContent = newCount.toLocaleString();
-    } catch(e) {
-      countQueued = false; // allow one retry if network failed
-    }
+    } catch(e) { countQueued = false; }
   }
 
   loadCounter();
