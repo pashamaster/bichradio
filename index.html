@@ -227,13 +227,8 @@
       transform: scale(1.05);
     }
 
-    .volume-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      width: 100%;
-      max-width: 280px;
-    }
+    .volume-row { display: flex; align-items: center; gap: 12px; width: 100%; max-width: 280px; }
+    .volume-row.hidden { display: none; }
 
     .volume-icon { color: var(--muted); flex-shrink: 0; }
 
@@ -298,6 +293,82 @@
     }
 
     .app { animation: fadein 0.8s ease both; }
+
+    /* ── PWA install banner ── */
+    .pwa-banner {
+      display: none;
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      z-index: 999;
+      padding: 14px 20px 20px;
+      background: #161410;
+      border-top: 1px solid rgba(200,169,110,0.2);
+      animation: slideup 0.4s cubic-bezier(0.16,1,0.3,1) both;
+    }
+
+    .pwa-banner.visible { display: flex; align-items: center; gap: 14px; }
+
+    @keyframes slideup {
+      from { transform: translateY(100%); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+
+    .pwa-icon {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      background: #0a0a0a;
+      border: 1px solid rgba(200,169,110,0.3);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 0.7rem;
+      color: var(--accent);
+      letter-spacing: 0.02em;
+    }
+
+    .pwa-text { flex: 1; }
+
+    .pwa-text strong {
+      display: block;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      color: var(--text);
+      margin-bottom: 3px;
+    }
+
+    .pwa-text span {
+      font-size: 0.6rem;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .pwa-share-icon {
+      display: inline-block;
+      width: 12px; height: 14px;
+      vertical-align: middle;
+      margin: 0 2px;
+      position: relative; top: -1px;
+    }
+
+    .pwa-dismiss {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1.1rem;
+      padding: 4px 6px;
+      line-height: 1;
+      flex-shrink: 0;
+      transition: color 0.2s;
+    }
+
+    .pwa-dismiss:hover { color: var(--text); }
+
+    /* Android variant — shows "Add to Home Screen" tap instruction */
+    .pwa-banner.android .ios-hint  { display: none; }
+    .pwa-banner.ios     .and-hint  { display: none; }
   </style>
 </head>
 <body>
@@ -349,6 +420,25 @@
       <span class="counter-label">times</span>
     </div>
   </div>
+</div>
+
+<!-- PWA install banner -->
+<div class="pwa-banner" id="pwa-banner" role="banner" aria-label="Install bichradio">
+  <div class="pwa-icon">br</div>
+  <div class="pwa-text">
+    <strong>Install bichradio</strong>
+    <span class="ios-hint">
+      Tap
+      <svg class="pwa-share-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)">
+        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+      </svg>
+      then <em style="color:var(--accent);font-style:normal">Add to Home Screen</em>
+    </span>
+    <span class="and-hint">
+      Tap <em style="color:var(--accent);font-style:normal">⋮ Menu → Add to Home Screen</em>
+    </span>
+  </div>
+  <button class="pwa-dismiss" id="pwa-dismiss" aria-label="Dismiss">✕</button>
 </div>
 
 <iframe id="sc-widget-sexy"
@@ -651,7 +741,7 @@
   }, 700);
 
   // ── Visit counter (GitHub Gist) ──────────────────────────
- const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
+  const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
   const GH_TOKEN   = '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';
   const GIST_FILE = 'bichradio-counter.json';
   let counted     = false;
@@ -698,6 +788,76 @@
   }
 
   loadCounter();
+
+  // ── Hide volume bar on mobile/PWA ────────────────────────
+  (function() {
+    const isMobile  = /iphone|ipad|ipod|android/i.test(navigator.userAgent);
+    const isPWA     = window.matchMedia('(display-mode: standalone)').matches
+                   || window.navigator.standalone === true;
+    if (isMobile || isPWA) {
+      document.querySelector('.volume-row').classList.add('hidden');
+    }
+  })();
+
+  // ── PWA install banner ───────────────────────────────────
+  (function() {
+    const banner  = document.getElementById('pwa-banner');
+    const dismiss = document.getElementById('pwa-dismiss');
+    const STORAGE_KEY = 'bichradio-pwa-dismissed';
+
+    // Don't show if already dismissed, or already running as installed PWA
+    const isInstalled = window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+    const wasDismissed = sessionStorage.getItem(STORAGE_KEY);
+
+    if (isInstalled || wasDismissed) return;
+
+    const ua = navigator.userAgent;
+    const isIOS     = /iphone|ipad|ipod/i.test(ua) && !/crios/i.test(ua);
+    const isAndroid = /android/i.test(ua);
+    const isMobile  = isIOS || isAndroid;
+    const isSafari  = isIOS && /safari/i.test(ua) && !/fxios/i.test(ua);
+
+    // iOS: only show in Safari (Chrome on iOS can't install PWAs)
+    // Android: show in any mobile browser
+    if (!isMobile) return;
+    if (isIOS && !isSafari) return;
+
+    banner.classList.add('visible');
+    banner.classList.add(isIOS ? 'ios' : 'android');
+
+    // Android: intercept the beforeinstallprompt for a native prompt
+    let deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      deferredPrompt = e;
+    });
+
+    // Tapping the banner body on Android triggers native install prompt
+    banner.addEventListener('click', async e => {
+      if (e.target === dismiss) return;
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') hideBanner();
+        deferredPrompt = null;
+      }
+      // iOS: tapping does nothing extra — user follows the text instructions
+    });
+
+    dismiss.addEventListener('click', hideBanner);
+
+    // Auto-hide after 12 seconds
+    setTimeout(hideBanner, 12000);
+
+    function hideBanner() {
+      sessionStorage.setItem(STORAGE_KEY, '1');
+      banner.style.transition = 'opacity 0.4s, transform 0.4s';
+      banner.style.opacity    = '0';
+      banner.style.transform  = 'translateY(100%)';
+      setTimeout(() => banner.remove(), 400);
+    }
+  })();
 
   // ── Service worker ───────────────────────────────────────
   if ('serviceWorker' in navigator) {
