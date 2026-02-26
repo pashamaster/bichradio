@@ -442,7 +442,7 @@
 </div>
 
 <iframe id="sc-widget-sexy"
-  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
+  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=true&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
   allow="autoplay">
 </iframe>
 <iframe id="sc-widget-class"
@@ -482,7 +482,7 @@
 
   const SEEK_MIN   = 23 * 60 * 1000;
   const SEEK_MAX   = 43 * 60 * 1000;
-  const FADE_MS    = 1800;
+  const FADE_MS    = 1000;
   const FADE_STEPS = 25;
 
   // ── Helpers ──────────────────────────────────────────────
@@ -645,7 +645,7 @@
       isPlaying  = false;
 
       // Fade out old channel (short — 1s) while new one starts
-      fadeWidget(from.widget, userVolume, 0, 1000, () => {
+      fadeWidget(from.widget, userVolume, 0, 500, () => {
         from.widget.pause();
         from.widget.setVolume(0);
       });
@@ -741,7 +741,7 @@
   }, 700);
 
   // ── Visit counter (GitHub Gist) ──────────────────────────
-  const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
+ const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
   const GH_TOKEN   = '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';
   const GIST_FILE = 'bichradio-counter.json';
   let counted     = false;
