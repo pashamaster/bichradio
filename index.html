@@ -588,6 +588,8 @@
         setStatus('');
         // Seek into range on first play of a track
         setTimeout(doSeek, 300);
+        // Count this session — fires the moment audio actually starts
+        incrementCounter();
       }
     });
 
@@ -685,7 +687,6 @@
       if (!tracks.length) { setStatus('loading…'); return; }
       applyVolume();
       playTrack(currentIdx);
-      incrementCounter();
     }
   });
 
@@ -717,10 +718,12 @@
   }, 700);
 
   // ── Visit counter (GitHub Gist) ──────────────────────────
+  // Counts once per session when playback actually starts (PLAY event fires)
   const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
   const GH_TOKEN   = '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';
   const GIST_FILE = 'bichradio-counter.json';
-  let counted = false;
+  let counted     = false;
+  let countQueued = false; // prevents race if PLAY fires twice quickly
 
   async function gistRequest(method, body) {
     return fetch(`https://api.github.com/gists/${GIST_ID}`, {
@@ -745,17 +748,28 @@
   }
 
   async function incrementCounter() {
-    if (counted) return;
-    counted = true;
+    if (counted || countQueued) return;
+    countQueued = true;
     try {
-      const res      = await gistRequest('GET');
-      if (!res.ok) throw new Error();
+      // Read current value
+      const res = await gistRequest('GET');
+      if (!res.ok) throw new Error('read failed');
       const data     = await res.json();
       const current  = JSON.parse(data.files[GIST_FILE].content);
       const newCount = (current.count || 0) + 1;
+
+      // Write new value
+      const writeRes = await gistRequest('PATCH', {
+        files: { [GIST_FILE]: { content: JSON.stringify({ count: newCount }) } }
+      });
+      if (!writeRes.ok) throw new Error('write failed');
+
+      // Only mark as counted after confirmed write
+      counted = true;
       document.getElementById('counter-value').textContent = newCount.toLocaleString();
-      await gistRequest('PATCH', { files: { [GIST_FILE]: { content: JSON.stringify({ count: newCount }) } } });
-    } catch(e) { counted = false; }
+    } catch(e) {
+      countQueued = false; // allow one retry if network failed
+    }
   }
 
   loadCounter();
