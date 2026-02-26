@@ -479,6 +479,120 @@
     viz.appendChild(b);
   }
 
+  // ── SoundCloud availability — 3-level check ──────────────
+  // Level 1: IP geolocation (known blocked regions)
+  // Level 2: Can we actually fetch the SC widget JS?
+  // Level 3: Did the class widget fire READY within timeout?
+  // All three must agree before switching to Mixcloud fallback.
+
+  const BLOCKED_COUNTRIES  = ['RU', 'BY', 'KP', 'IR', 'CU', 'SY'];
+  const MIXCLOUD_CLASS_URL = 'https://www.mixcloud.com/pashakaef/playlists/class/';
+  let   scBlocked          = false; // set true only after all 3 levels confirm
+
+  // Score system — need 2+ signals to confirm blocked
+  let blockScore = 0;
+
+  async function checkLevel1_Geo() {
+    try {
+      // Use two independent geo APIs for cross-check
+      const res = await Promise.race([
+        fetch('https://ipapi.co/json/', { cache: 'no-store' }),
+        new Promise((_, rej) => setTimeout(() => rej('timeout'), 4000))
+      ]);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (BLOCKED_COUNTRIES.includes(data.country_code)) {
+        blockScore++;
+        console.log('[bichradio] Level 1: geo blocked —', data.country_code);
+      }
+    } catch(e) {
+      // Geo lookup failed — don't penalise, just skip
+    }
+  }
+
+  async function checkLevel2_Network() {
+    try {
+      // Try fetching a tiny known SC resource with short timeout
+      // If it loads → SC is reachable. If it fails → likely blocked.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch('https://w.soundcloud.com/player/api.js', {
+        method: 'HEAD',
+        cache:  'no-store',
+        signal: ctrl.signal
+      });
+      clearTimeout(timer);
+      if (!res.ok) {
+        blockScore++;
+        console.log('[bichradio] Level 2: SC network unreachable — status', res.status);
+      }
+    } catch(e) {
+      // Fetch threw (aborted, network error) — SC not reachable
+      blockScore++;
+      console.log('[bichradio] Level 2: SC network fetch failed —', e.message || e);
+    }
+  }
+
+  // Level 3 is checked after widget READY — see bindChannel()
+  // If class widget doesn't fire READY within 10s → blockScore++
+
+  async function runAvailabilityChecks() {
+    // Run Level 1 + 2 in parallel
+    await Promise.all([checkLevel1_Geo(), checkLevel2_Network()]);
+    // Level 3 runs separately via widget timeout (see bindChannel)
+    // After 12s total, evaluate
+    setTimeout(evaluateBlock, 7000);
+  }
+
+  function evaluateBlock() {
+    if (scBlocked) return; // already switched
+    if (blockScore >= 2) {
+      console.log('[bichradio] SC confirmed blocked (score ' + blockScore + '/3) — switching class to Mixcloud');
+      scBlocked = true;
+      switchClassToMixcloud();
+    } else {
+      console.log('[bichradio] SC available (block score ' + blockScore + '/3) — no fallback needed');
+    }
+  }
+
+  function switchClassToMixcloud() {
+    const btn = document.getElementById('btn-class');
+    if (!btn) return;
+
+    // Smoothly hide the sexy button
+    const sexyBtn = document.getElementById('btn-sexy');
+    if (sexyBtn) {
+      sexyBtn.style.transition = 'opacity 0.6s ease, transform 0.6s ease, max-width 0.6s ease, padding 0.6s ease, margin 0.6s ease';
+      sexyBtn.style.opacity    = '0';
+      sexyBtn.style.transform  = 'scale(0.8)';
+      setTimeout(() => {
+        sexyBtn.style.maxWidth = '0';
+        sexyBtn.style.padding  = '0';
+        sexyBtn.style.margin   = '0';
+        sexyBtn.style.border   = 'none';
+        sexyBtn.style.overflow = 'hidden';
+      }, 600);
+    }
+
+    btn.addEventListener('click', openMixcloud, { once: false });
+    btn.dataset.mixcloud = '1';
+    btn.title = 'Opens Mixcloud (SoundCloud unavailable in your region)';
+
+    if (activeId === 'class') {
+      active().widget.pause();
+      setStatus('SoundCloud unavailable — opening Mixcloud…');
+      setTimeout(() => window.open(MIXCLOUD_CLASS_URL, '_blank'), 800);
+    }
+  }
+
+  function openMixcloud(e) {
+    e.stopImmediatePropagation();
+    window.open(MIXCLOUD_CLASS_URL, '_blank');
+    // Don't switch activeId or mess with players
+  }
+
+  runAvailabilityChecks();
+
   // ── Two widgets, both pre-loaded silently ────────────────
   const channels = {
     sexy:  { id: 'sexy',  iframe: document.getElementById('sc-widget-sexy'),  widget: null, tracks: [], shuffled: [], ready: false },
@@ -500,8 +614,8 @@
 
   const SEEK_MIN   = 23 * 60 * 1000;
   const SEEK_MAX   = 43 * 60 * 1000;
-  const FADE_MS    = 1000;
-  const FADE_STEPS = 25;
+  const FADE_MS    = 300;
+  const FADE_STEPS = 8;
 
   // ── Helpers ──────────────────────────────────────────────
   function active()   { return channels[activeId]; }
@@ -583,7 +697,21 @@
 
   // ── Bind events for one channel widget ───────────────────
   function bindChannel(ch) {
+    // ── Level 3: widget READY timeout (class only) ────────────
+    // If SC widget doesn't fire READY within 10s, SC is likely blocked
+    let readyTimer = null;
+    if (ch.id === 'class') {
+      readyTimer = setTimeout(() => {
+        if (!ch.ready) {
+          blockScore++;
+          console.log('[bichradio] Level 3: class widget READY timeout — SC likely blocked');
+          evaluateBlock();
+        }
+      }, 5000);
+    }
+
     ch.widget.bind(SC.Widget.Events.READY, () => {
+      if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
       ch.widget.getSounds(sounds => {
         if (!sounds.length) return;
         ch.tracks   = sounds;
@@ -605,36 +733,20 @@
         isPlaying = true;
         viz.classList.remove('paused');
         setPlayIcon(true);
-        ch.widget.getCurrentSound(s => { if (s) setTitle(s.title); });
+        ch.widget.getCurrentSound(s => {
+          if (s) {
+            setTitle(s.title);
+            updateMediaSession(s.title);
+          }
+        });
         setStatus('');
         setTimeout(() => doSeek(ch.widget), 400);
-
-        // ── Lock screen / notification metadata ──────────────
-        if ('mediaSession' in navigator) {
-          navigator.mediaSession.metadata = new MediaMetadata({
-            title:  ch.tracks[ch.shuffled[currentIdx]]?.title || 'bichradio',
-            artist: 'bichradio',
-            album:  activeId === 'sexy' ? 'sexy' : 'class',
-            artwork: [
-              { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-              { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
-            ]
-          });
-          navigator.mediaSession.playbackState = 'playing';
-
-          // Wire lock screen controls to the player
-          navigator.mediaSession.setActionHandler('play',         () => { ch.widget.setVolume(userVolume); reliablePlay(ch.widget); });
-          navigator.mediaSession.setActionHandler('pause',        () => { ch.widget.pause(); });
-          navigator.mediaSession.setActionHandler('nexttrack',    () => { currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); });
-          navigator.mediaSession.setActionHandler('previoustrack',() => { currentIdx = (currentIdx - 1 + ch.shuffled.length) % ch.shuffled.length; playTrack(currentIdx); });
-        }
       }
-      // If this PLAY is from a channel switch, fade in
+      // Instant volume restore on new channel
       if (switching) {
-        fadeWidget(ch.widget, 0, userVolume, FADE_MS, () => {
-          switching = false;
-          document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
-        });
+        ch.widget.setVolume(userVolume);
+        switching = false;
+        document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
       }
     });
 
@@ -643,7 +755,7 @@
       isPlaying = false;
       viz.classList.add('paused');
       setPlayIcon(false);
-      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+      pauseMediaSession();
     });
 
     ch.widget.bind(SC.Widget.Events.FINISH, () => {
@@ -682,11 +794,9 @@
       didSeek    = false;
       isPlaying  = false;
 
-      // Fade out old channel (short — 1s) while new one starts
-      fadeWidget(from.widget, userVolume, 0, 500, () => {
-        from.widget.pause();
-        from.widget.setVolume(0);
-      });
+      // Instant cut on old channel
+      from.widget.setVolume(0);
+      from.widget.pause();
 
       // Start new channel immediately (will fade in via PLAY event handler)
       to.widget.skip(to.shuffled[currentIdx]);
@@ -729,6 +839,8 @@
   document.querySelectorAll('.pl-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const toId = btn.id === 'btn-sexy' ? 'sexy' : 'class';
+      // If class is in Mixcloud fallback mode, openMixcloud handler takes over
+      if (toId === 'class' && btn.dataset.mixcloud) return;
       if (toId === activeId || switching) return;
       document.querySelectorAll('.pl-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
@@ -780,8 +892,8 @@
 
   // ── Visit counter (GitHub Gist) ──────────────────────────
   // Increments every time the page loads
-  const GIST_ID   = '81efc77d0223e4f68efb043a0527411b';
-  const GH_TOKEN  = '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';
+  const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
+  const GH_TOKEN   = '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';
   const GIST_FILE = 'bichradio-counter.json';
 
   async function gistRequest(method, body) {
@@ -881,6 +993,75 @@
       setTimeout(() => banner.remove(), 400);
     }
   })();
+
+  // ── Media Session (lock screen) ──────────────────────────
+  // The browser only assigns MediaSession to pages that own a native <audio>
+  // element. Since our audio lives in a cross-origin SC iframe, we play a
+  // silent looping tone from THIS page to claim the session, then set our
+  // metadata on top of it.
+  const silentAudio = (function() {
+    if (!('mediaSession' in navigator)) return null;
+
+    // 1-second silent MP3 as a data URI (44 bytes, valid file)
+    const SILENT = 'data:audio/mpeg;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA//////////////////////////////////////////////////////////////////8AAAA5TEVER' +
+      'AAAAB0ZvciBtb3JlIGluZm9ybWF0aW9uIGFib3V0IFRoaXMgZmlsZSwgdmlzaXQgdGhlIExhbWUgaG9tZXBhZ2Uu//uSxAACAABoBAAAACAADSAAAAETEFNRTMuOTlyBYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+
+    const el = document.createElement('audio');
+    el.src    = SILENT;
+    el.loop   = true;
+    el.volume = 0.001; // near-silent but non-zero — browser needs actual audio output
+    document.body.appendChild(el);
+
+    // Register action handlers once
+    const ch = () => channels[activeId];
+
+    navigator.mediaSession.setActionHandler('play', () => {
+      const c = ch();
+      c.widget.setVolume(userVolume);
+      reliablePlay(c.widget);
+      el.play().catch(() => {});
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      ch().widget.pause();
+      el.pause();
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', () => {
+      currentIdx = (currentIdx + 1) % ch().shuffled.length;
+      playTrack(currentIdx);
+    });
+    navigator.mediaSession.setActionHandler('previoustrack', () => {
+      currentIdx = (currentIdx - 1 + ch().shuffled.length) % ch().shuffled.length;
+      playTrack(currentIdx);
+    });
+
+    return el;
+  })();
+
+  function updateMediaSession(title) {
+    if (!('mediaSession' in navigator)) return;
+
+    // Start silent audio to claim the session (needs user gesture, already happened)
+    if (silentAudio && silentAudio.paused) {
+      silentAudio.play().catch(() => {});
+    }
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title:  title || 'bichradio',
+      artist: 'bichradio',
+      album:  activeId === 'sexy' ? 'sexy' : 'class',
+      artwork: [
+        { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+        { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
+      ]
+    });
+    navigator.mediaSession.playbackState = 'playing';
+  }
+
+  function pauseMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = 'paused';
+    if (silentAudio && !silentAudio.paused) silentAudio.pause();
+  }
 
   // ── Service worker ───────────────────────────────────────
   if ('serviceWorker' in navigator) {
