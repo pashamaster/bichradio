@@ -3,41 +3,38 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="bichradio" />
+  <meta name="theme-color" content="#0a0a0a" />
   <title>bichradio</title>
-
-  <!-- Telegram Mini App SDK -->
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
+  <link rel="manifest" href="manifest.json" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500&family=Playfair+Display:ital@0;1&display=swap" rel="stylesheet" />
 
   <style>
     :root {
-      --bg:      #0a0a0a;
+      --bg: #0a0a0a;
       --surface: #111111;
-      --border:  rgba(255,255,255,0.07);
-      --text:    #e8e2d9;
-      --muted:   rgba(232,226,217,0.35);
-      --accent:  #c8a96e;
-      --red:     #e05252;
+      --border: rgba(255,255,255,0.07);
+      --text: #e8e2d9;
+      --muted: rgba(232,226,217,0.35);
+      --accent: #c8a96e;
+      --red: #e05252;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     html, body {
       height: 100%;
-      /* Use Telegram's background color if available, fallback to our dark */
-      background: var(--tg-theme-bg-color, var(--bg));
+      background: var(--bg);
       color: var(--text);
       font-family: 'Geist Mono', monospace;
       overflow: hidden;
       -webkit-font-smoothing: antialiased;
-      /* Prevent elastic scroll bounce in Telegram WebView */
-      overscroll-behavior: none;
     }
 
-    /* Grain overlay */
     body::before {
       content: '';
       position: fixed;
@@ -53,16 +50,14 @@
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      /* Respect Telegram's safe area insets */
-      padding-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px));
-      padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
+      padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0);
     }
 
     header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 24px 28px 0;
+      padding: 28px 28px 0;
     }
 
     .logo {
@@ -84,7 +79,8 @@
     }
 
     .live-dot {
-      width: 6px; height: 6px;
+      width: 6px;
+      height: 6px;
       border-radius: 50%;
       background: var(--red);
       box-shadow: 0 0 8px var(--red);
@@ -93,7 +89,7 @@
 
     @keyframes pulse {
       0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--red); }
-      50%       { opacity: 0.4; box-shadow: 0 0 2px var(--red); }
+      50% { opacity: 0.4; box-shadow: 0 0 2px var(--red); }
     }
 
     .center {
@@ -103,15 +99,14 @@
       align-items: center;
       justify-content: center;
       padding: 0 28px;
-      gap: 36px;
+      gap: 40px;
     }
 
-    /* Visualizer */
     .visualizer {
       display: flex;
       align-items: flex-end;
       gap: 3px;
-      height: 44px;
+      height: 48px;
       opacity: 0.5;
     }
 
@@ -125,14 +120,14 @@
 
     @keyframes bounce {
       from { transform: scaleY(0.1); }
-      to   { transform: scaleY(1); }
+      to { transform: scaleY(1); }
     }
 
     .visualizer.paused .bar { animation-play-state: paused; transform: scaleY(0.1); }
 
     .track-info {
       text-align: center;
-      max-width: 300px;
+      max-width: 320px;
       width: 100%;
     }
 
@@ -141,12 +136,12 @@
       letter-spacing: 0.22em;
       color: var(--muted);
       text-transform: uppercase;
-      margin-bottom: 12px;
+      margin-bottom: 14px;
     }
 
     .track-title {
       font-family: 'Playfair Display', serif;
-      font-size: clamp(1.1rem, 5vw, 1.6rem);
+      font-size: clamp(1.2rem, 5vw, 1.7rem);
       line-height: 1.35;
       color: var(--text);
       min-height: 2.7em;
@@ -158,7 +153,6 @@
 
     .track-title.fading { opacity: 0; }
 
-    /* Channel buttons */
     .playlist-btns {
       display: flex;
       gap: 12px;
@@ -176,21 +170,24 @@
       border-radius: 2px;
       cursor: pointer;
       transition: all 0.2s;
-      /* Telegram touch — bigger tap target */
-      min-height: 40px;
     }
 
-    .pl-btn:hover   { border-color: var(--accent); color: var(--accent); }
-    .pl-btn.active  { border-color: var(--accent); color: var(--accent); background: rgba(200,169,110,0.07); }
+    .pl-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .pl-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(200,169,110,0.07);
+    }
+
     .pl-btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
 
-    /* Controls */
     .controls {
-      padding: 0 28px 32px;
+      padding: 0 28px 40px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 22px;
+      gap: 24px;
     }
 
     .main-controls {
@@ -209,26 +206,58 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      /* Larger tap target for Telegram */
-      min-width: 44px;
-      min-height: 44px;
     }
 
-    .btn:active { transform: scale(0.92); color: var(--text); }
+    .btn:hover { color: var(--text); transform: scale(1.1); }
+    .btn:active { transform: scale(0.95); }
 
     .btn-play {
-      width: 64px; height: 64px;
+      width: 64px;
+      height: 64px;
       border-radius: 50%;
       border: 1px solid var(--border) !important;
       background: var(--surface) !important;
       color: var(--text);
-      transition: all 0.15s;
+      transition: all 0.2s;
     }
 
-    .btn-play:active {
+    .btn-play:hover {
       border-color: var(--accent) !important;
       color: var(--accent);
-      transform: scale(0.94);
+      transform: scale(1.05);
+    }
+
+    .volume-row { display: flex; align-items: center; gap: 12px; width: 100%; max-width: 280px; }
+    .volume-row.hidden { display: none; }
+
+    .volume-icon { color: var(--muted); flex-shrink: 0; }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+      outline: none;
+      border-radius: 1px;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+
+    #sc-widget-sexy, #sc-widget-class {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+      bottom: 0; left: 0;
     }
 
     .loading-msg {
@@ -236,13 +265,13 @@
       letter-spacing: 0.1em;
       color: var(--muted);
       text-align: center;
-      min-height: 1em;
     }
 
     .counter-wrap {
       display: flex;
       align-items: center;
       gap: 7px;
+      margin-top: 4px;
     }
 
     .counter-label {
@@ -258,27 +287,88 @@
       color: rgba(232,226,217,0.35);
     }
 
-    /* Hidden SC iframes */
-    #sc-widget-sexy, #sc-widget-class {
-      position: absolute;
-      width: 1px; height: 1px;
-      opacity: 0;
-      pointer-events: none;
-      bottom: 0; left: 0;
-    }
-
     @keyframes fadein {
-      from { opacity: 0; transform: translateY(8px); }
-      to   { opacity: 1; transform: translateY(0); }
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
-    .app { animation: fadein 0.6s ease both; }
+    .app { animation: fadein 0.8s ease both; }
 
-    /* Telegram haptic ripple on button tap */
-    @keyframes ripple {
-      from { transform: scale(0.9); opacity: 0.6; }
-      to   { transform: scale(1);   opacity: 0; }
+    /* ── PWA install banner ── */
+    .pwa-banner {
+      display: none;
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      z-index: 999;
+      padding: 14px 20px 20px;
+      background: #161410;
+      border-top: 1px solid rgba(200,169,110,0.2);
+      animation: slideup 0.4s cubic-bezier(0.16,1,0.3,1) both;
     }
+
+    .pwa-banner.visible { display: flex; align-items: center; gap: 14px; }
+
+    @keyframes slideup {
+      from { transform: translateY(100%); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+
+    .pwa-icon {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      background: #0a0a0a;
+      border: 1px solid rgba(200,169,110,0.3);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 0.7rem;
+      color: var(--accent);
+      letter-spacing: 0.02em;
+    }
+
+    .pwa-text { flex: 1; }
+
+    .pwa-text strong {
+      display: block;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      color: var(--text);
+      margin-bottom: 3px;
+    }
+
+    .pwa-text span {
+      font-size: 0.6rem;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .pwa-share-icon {
+      display: inline-block;
+      width: 12px; height: 14px;
+      vertical-align: middle;
+      margin: 0 2px;
+      position: relative; top: -1px;
+    }
+
+    .pwa-dismiss {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1.1rem;
+      padding: 4px 6px;
+      line-height: 1;
+      flex-shrink: 0;
+      transition: color 0.2s;
+    }
+
+    .pwa-dismiss:hover { color: var(--text); }
+
+    /* Android variant — shows "Add to Home Screen" tap instruction */
+    .pwa-banner.android .ios-hint  { display: none; }
+    .pwa-banner.ios     .and-hint  { display: none; }
   </style>
 </head>
 <body>
@@ -300,8 +390,8 @@
     </div>
 
     <div class="playlist-btns">
-      <button class="pl-btn" id="btn-class">class</button>
-      <button class="pl-btn active" id="btn-sexy">sexy</button>
+      <button class="pl-btn" id="btn-class" data-playlist="https%3A//soundcloud.com/pavel-masterov/sets/class">class</button>
+      <button class="pl-btn active" id="btn-sexy" data-playlist="https%3A//soundcloud.com/pavel-masterov/sets/sexy">sexy</button>
     </div>
   </div>
 
@@ -318,6 +408,11 @@
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2-8.14 5.25 3.64L8 16.14V9.86zM16 6h2v12h-2z"/></svg>
       </button>
     </div>
+    <div class="volume-row">
+      <svg class="volume-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+      <input type="range" id="volume" min="0" max="100" value="80" />
+      <svg class="volume-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM16.5 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+    </div>
     <div class="loading-msg" id="status-msg">tap play to start</div>
     <div class="counter-wrap">
       <span class="counter-label">tuned in</span>
@@ -325,6 +420,25 @@
       <span class="counter-label">times</span>
     </div>
   </div>
+</div>
+
+<!-- PWA install banner -->
+<div class="pwa-banner" id="pwa-banner" role="banner" aria-label="Install bichradio">
+  <div class="pwa-icon">br</div>
+  <div class="pwa-text">
+    <strong>Install bichradio</strong>
+    <span class="ios-hint">
+      Tap
+      <svg class="pwa-share-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)">
+        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+      </svg>
+      then <em style="color:var(--accent);font-style:normal">Add to Home Screen</em>
+    </span>
+    <span class="and-hint">
+      Tap <em style="color:var(--accent);font-style:normal">⋮ Menu → Add to Home Screen</em>
+    </span>
+  </div>
+  <button class="pwa-dismiss" id="pwa-dismiss" aria-label="Dismiss">✕</button>
 </div>
 
 <iframe id="sc-widget-sexy"
@@ -338,27 +452,25 @@
 
 <script src="https://w.soundcloud.com/player/api.js"></script>
 <script>
-  // ── Telegram WebApp init ──────────────────────────────────
-  const tg = window.Telegram?.WebApp;
-  if (tg) {
-    tg.ready();
-    tg.expand(); // full screen
-    tg.disableVerticalSwipes(); // prevent accidental close on swipe
-    // Force dark background matching our theme
-    if (tg.setBackgroundColor) tg.setBackgroundColor('#0a0a0a');
-    if (tg.setHeaderColor)     tg.setHeaderColor('#0a0a0a');
-  }
+  // ── Version check — auto-reload if stale ─────────────────
+  const PAGE_VERSION = '1772090907';
+  (async function checkVersion() {
+    try {
+      const res  = await fetch('/version.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.version && data.version !== PAGE_VERSION) {
+        // New deploy detected — wipe caches and reload once
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        }
+        location.reload(true);
+      }
+    } catch(e) {}
+  })();
 
-  // Telegram haptic feedback helper
-  const haptic = {
-    light:   () => tg?.HapticFeedback?.impactOccurred('light'),
-    medium:  () => tg?.HapticFeedback?.impactOccurred('medium'),
-    success: () => tg?.HapticFeedback?.notificationOccurred('success'),
-    error:   () => tg?.HapticFeedback?.notificationOccurred('error'),
-    select:  () => tg?.HapticFeedback?.selectionChanged()
-  };
-
-  // ── Visualizer bars ───────────────────────────────────────
+  // ── Visualizer bars ──────────────────────────────────────
   const viz = document.getElementById('visualizer');
   for (let i = 0; i < 22; i++) {
     const b = document.createElement('div');
@@ -367,14 +479,22 @@
     viz.appendChild(b);
   }
 
-  // ── SoundCloud availability — 3-level check ───────────────
+  // ── SoundCloud availability — 3-level check ──────────────
+  // Level 1: IP geolocation (known blocked regions)
+  // Level 2: Can we actually fetch the SC widget JS?
+  // Level 3: Did the class widget fire READY within timeout?
+  // All three must agree before switching to Mixcloud fallback.
+
   const BLOCKED_COUNTRIES  = ['RU', 'BY', 'KP', 'IR', 'CU', 'SY'];
   const MIXCLOUD_CLASS_URL = 'https://www.mixcloud.com/pashakaef/playlists/class/';
-  let   scBlocked          = false;
-  let   blockScore         = 0;
+  let   scBlocked          = false; // set true only after all 3 levels confirm
+
+  // Score system — need 2+ signals to confirm blocked
+  let blockScore = 0;
 
   async function checkLevel1_Geo() {
     try {
+      // Use two independent geo APIs for cross-check
       const res = await Promise.race([
         fetch('https://ipapi.co/json/', { cache: 'no-store' }),
         new Promise((_, rej) => setTimeout(() => rej('timeout'), 4000))
@@ -385,44 +505,62 @@
         blockScore++;
         console.log('[bichradio] Level 1: geo blocked —', data.country_code);
       }
-    } catch(e) {}
+    } catch(e) {
+      // Geo lookup failed — don't penalise, just skip
+    }
   }
 
   async function checkLevel2_Network() {
     try {
-      const ctrl  = new AbortController();
+      // Try fetching a tiny known SC resource with short timeout
+      // If it loads → SC is reachable. If it fails → likely blocked.
+      const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 5000);
-      const res   = await fetch('https://w.soundcloud.com/player/api.js', {
-        method: 'HEAD', cache: 'no-store', signal: ctrl.signal
+      const res = await fetch('https://w.soundcloud.com/player/api.js', {
+        method: 'HEAD',
+        cache:  'no-store',
+        signal: ctrl.signal
       });
       clearTimeout(timer);
-      if (!res.ok) { blockScore++; console.log('[bichradio] Level 2: SC unreachable', res.status); }
+      if (!res.ok) {
+        blockScore++;
+        console.log('[bichradio] Level 2: SC network unreachable — status', res.status);
+      }
     } catch(e) {
+      // Fetch threw (aborted, network error) — SC not reachable
       blockScore++;
-      console.log('[bichradio] Level 2: SC fetch failed');
+      console.log('[bichradio] Level 2: SC network fetch failed —', e.message || e);
     }
   }
 
+  // Level 3 is checked after widget READY — see bindChannel()
+  // If class widget doesn't fire READY within 10s → blockScore++
+
   async function runAvailabilityChecks() {
+    // Run Level 1 + 2 in parallel
     await Promise.all([checkLevel1_Geo(), checkLevel2_Network()]);
+    // Level 3 runs separately via widget timeout (see bindChannel)
+    // After 12s total, evaluate
     setTimeout(evaluateBlock, 7000);
   }
 
   function evaluateBlock() {
-    if (scBlocked) return;
+    if (scBlocked) return; // already switched
     if (blockScore >= 2) {
+      console.log('[bichradio] SC confirmed blocked (score ' + blockScore + '/3) — switching class to Mixcloud');
       scBlocked = true;
-      console.log('[bichradio] SC blocked — switching class to Mixcloud');
       switchClassToMixcloud();
+    } else {
+      console.log('[bichradio] SC available (block score ' + blockScore + '/3) — no fallback needed');
     }
   }
 
   function switchClassToMixcloud() {
-    const btn     = document.getElementById('btn-class');
-    const sexyBtn = document.getElementById('btn-sexy');
+    const btn = document.getElementById('btn-class');
     if (!btn) return;
 
-    // Smoothly hide sexy button
+    // Smoothly hide the sexy button
+    const sexyBtn = document.getElementById('btn-sexy');
     if (sexyBtn) {
       sexyBtn.style.transition = 'opacity 0.6s ease, transform 0.6s ease, max-width 0.6s ease, padding 0.6s ease, margin 0.6s ease';
       sexyBtn.style.opacity    = '0';
@@ -438,28 +576,24 @@
 
     btn.addEventListener('click', openMixcloud, { once: false });
     btn.dataset.mixcloud = '1';
+    btn.title = 'Opens Mixcloud (SoundCloud unavailable in your region)';
 
     if (activeId === 'class') {
       active().widget.pause();
       setStatus('SoundCloud unavailable — opening Mixcloud…');
-      setTimeout(() => {
-        // Open via Telegram's openLink for proper in-app browser
-        if (tg?.openLink) tg.openLink(MIXCLOUD_CLASS_URL);
-        else window.open(MIXCLOUD_CLASS_URL, '_blank');
-      }, 800);
+      setTimeout(() => window.open(MIXCLOUD_CLASS_URL, '_blank'), 800);
     }
   }
 
   function openMixcloud(e) {
     e.stopImmediatePropagation();
-    haptic.light();
-    if (tg?.openLink) tg.openLink(MIXCLOUD_CLASS_URL);
-    else window.open(MIXCLOUD_CLASS_URL, '_blank');
+    window.open(MIXCLOUD_CLASS_URL, '_blank');
+    // Don't switch activeId or mess with players
   }
 
   runAvailabilityChecks();
 
-  // ── Two widgets, both pre-loaded silently ─────────────────
+  // ── Two widgets, both pre-loaded silently ────────────────
   const channels = {
     sexy:  { id: 'sexy',  iframe: document.getElementById('sc-widget-sexy'),  widget: null, tracks: [], shuffled: [], ready: false },
     class: { id: 'class', iframe: document.getElementById('sc-widget-class'), widget: null, tracks: [], shuffled: [], ready: false }
@@ -467,7 +601,9 @@
   channels.sexy.widget  = SC.Widget(channels.sexy.iframe);
   channels.class.widget = SC.Widget(channels.class.iframe);
 
-  // ── State ─────────────────────────────────────────────────
+  const volSlider = document.getElementById('volume');
+
+  // ── State ────────────────────────────────────────────────
   let activeId   = 'sexy';
   let isPlaying  = false;
   let currentIdx = 0;
@@ -476,10 +612,14 @@
   let playRetry  = null;
   let didSeek    = false;
 
-  const SEEK_MIN = 23 * 60 * 1000;
-  const SEEK_MAX = 43 * 60 * 1000;
+  const SEEK_MIN   = 23 * 60 * 1000;
+  const SEEK_MAX   = 43 * 60 * 1000;
+  const FADE_MS    = 300;
+  const FADE_STEPS = 8;
 
+  // ── Helpers ──────────────────────────────────────────────
   function active()   { return channels[activeId]; }
+  function inactive() { return channels[activeId === 'sexy' ? 'class' : 'sexy']; }
 
   function shuffle(arr) {
     const a = [...arr];
@@ -503,6 +643,21 @@
     document.getElementById('icon-pause').style.display = playing ? '' : 'none';
   }
 
+  // ── Smooth volume fade on a specific widget ───────────────
+  function fadeWidget(w, fromVol, toVol, ms, onDone) {
+    let step = 0;
+    const interval = ms / FADE_STEPS;
+    const timer = setInterval(() => {
+      step++;
+      const t    = step / FADE_STEPS;
+      const ease = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2; // ease-in-out cubic
+      const vol  = Math.round(fromVol + (toVol - fromVol) * ease);
+      w.setVolume(Math.max(0, Math.min(100, vol)));
+      if (step >= FADE_STEPS) { clearInterval(timer); if (onDone) onDone(); }
+    }, interval);
+    return timer;
+  }
+
   // ── Seek once per track into 23–43 min range ─────────────
   function doSeek(w) {
     if (didSeek) return;
@@ -516,7 +671,7 @@
     });
   }
 
-  // ── Reliable play with retry ──────────────────────────────
+  // ── Reliable play with retry ─────────────────────────────
   function reliablePlay(w, onConfirmed) {
     clearInterval(playRetry);
     let attempts = 0;
@@ -530,7 +685,7 @@
     playRetry = setInterval(attempt, 800);
   }
 
-  // ── Play a track ──────────────────────────────────────────
+  // ── Play a track on the active channel ───────────────────
   function playTrack(idx) {
     didSeek = false;
     clearInterval(playRetry);
@@ -540,15 +695,16 @@
     reliablePlay(ch.widget);
   }
 
-  // ── Bind events for one channel ───────────────────────────
+  // ── Bind events for one channel widget ───────────────────
   function bindChannel(ch) {
-    // Level 3 check: class widget READY timeout
+    // ── Level 3: widget READY timeout (class only) ────────────
+    // If SC widget doesn't fire READY within 10s, SC is likely blocked
     let readyTimer = null;
     if (ch.id === 'class') {
       readyTimer = setTimeout(() => {
         if (!ch.ready) {
           blockScore++;
-          console.log('[bichradio] Level 3: class READY timeout');
+          console.log('[bichradio] Level 3: class widget READY timeout — SC likely blocked');
           evaluateBlock();
         }
       }, 5000);
@@ -561,12 +717,14 @@
         ch.tracks   = sounds;
         ch.shuffled = shuffle(sounds.map((_, i) => i));
         ch.ready    = true;
+        // Keep inactive channel silenced
         if (ch.id !== activeId) ch.widget.setVolume(0);
       });
     });
 
     ch.widget.bind(SC.Widget.Events.PLAY, () => {
       if (ch.id !== activeId) {
+        // Inactive channel fired — silence and pause it immediately
         ch.widget.setVolume(0);
         ch.widget.pause();
         return;
@@ -583,8 +741,8 @@
         });
         setStatus('');
         setTimeout(() => doSeek(ch.widget), 400);
-        incrementCounter();
       }
+      // Instant volume restore on new channel
       if (switching) {
         ch.widget.setVolume(userVolume);
         switching = false;
@@ -610,7 +768,6 @@
     ch.widget.bind(SC.Widget.Events.ERROR, () => {
       if (ch.id !== activeId) return;
       isPlaying = false;
-      haptic.error();
       setStatus('stream error — skipping…');
       setTimeout(() => { currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); }, 800);
     });
@@ -619,7 +776,7 @@
   bindChannel(channels.sexy);
   bindChannel(channels.class);
 
-  // ── Channel switch ────────────────────────────────────────
+  // ── Channel switch — no iframe reload, near-instant ───────
   function switchChannel(toId) {
     if (switching || toId === activeId) return;
     switching = true;
@@ -630,15 +787,18 @@
     const to   = channels[toId];
 
     const startSwitch = () => {
+      // Pre-silence incoming, set activeId so events route correctly
       to.widget.setVolume(0);
       activeId   = toId;
       currentIdx = 0;
       didSeek    = false;
       isPlaying  = false;
 
+      // Instant cut on old channel
       from.widget.setVolume(0);
       from.widget.pause();
 
+      // Start new channel immediately (will fade in via PLAY event handler)
       to.widget.skip(to.shuffled[currentIdx]);
       reliablePlay(to.widget);
 
@@ -647,6 +807,7 @@
       viz.classList.add('paused');
       setPlayIcon(false);
 
+      // Safety release after 6s if something went wrong
       setTimeout(() => {
         if (switching) {
           switching = false;
@@ -669,36 +830,33 @@
           switching = false;
           document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
           setStatus('channel not ready — try again');
-          haptic.error();
         }
       }, 250);
     }
   }
 
-  // ── Playlist buttons ──────────────────────────────────────
+  // ── Playlist buttons ─────────────────────────────────────
   document.querySelectorAll('.pl-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const toId = btn.id === 'btn-sexy' ? 'sexy' : 'class';
+      // If class is in Mixcloud fallback mode, openMixcloud handler takes over
       if (toId === 'class' && btn.dataset.mixcloud) return;
       if (toId === activeId || switching) return;
-      haptic.select();
       document.querySelectorAll('.pl-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       switchChannel(toId);
     });
   });
 
-  // ── Playback controls ─────────────────────────────────────
+  // ── Play / Pause ─────────────────────────────────────────
   document.getElementById('btn-play').addEventListener('click', () => {
     if (switching) return;
     const ch = active();
     if (isPlaying) {
-      haptic.light();
       clearInterval(playRetry);
       ch.widget.pause();
     } else {
       if (!ch.ready) { setStatus('loading…'); return; }
-      haptic.medium();
       ch.widget.setVolume(userVolume);
       playTrack(currentIdx);
     }
@@ -706,7 +864,6 @@
 
   document.getElementById('btn-next').addEventListener('click', () => {
     if (switching) return;
-    haptic.light();
     const ch = active();
     currentIdx = (currentIdx + 1) % ch.shuffled.length;
     playTrack(currentIdx);
@@ -714,49 +871,27 @@
 
   document.getElementById('btn-prev').addEventListener('click', () => {
     if (switching) return;
-    haptic.light();
     const ch = active();
     currentIdx = (currentIdx - 1 + ch.shuffled.length) % ch.shuffled.length;
     playTrack(currentIdx);
   });
 
-  // ── Media Session (lock screen) ───────────────────────────
-  const silentAudio = (function() {
-    if (!('mediaSession' in navigator)) return null;
-    const SILENT = 'data:audio/mpeg;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA//////////////////////////////////////////////////////////////////8AAAA5TEVERAAAAB0ZvciBtb3JlIGluZm9ybWF0aW9uIGFib3V0IFRoaXMgZmlsZSwgdmlzaXQgdGhlIExhbWUgaG9tZXBhZ2Uu//uSxAACAABoBAAAACAADSAAAAETEFNRTMuOTlyBYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
-    const el = document.createElement('audio');
-    el.src = SILENT; el.loop = true; el.volume = 0.001;
-    document.body.appendChild(el);
-    const ch = () => channels[activeId];
-    navigator.mediaSession.setActionHandler('play',         () => { ch().widget.setVolume(userVolume); reliablePlay(ch().widget); el.play().catch(() => {}); });
-    navigator.mediaSession.setActionHandler('pause',        () => { ch().widget.pause(); el.pause(); });
-    navigator.mediaSession.setActionHandler('nexttrack',    () => { currentIdx = (currentIdx + 1) % ch().shuffled.length; playTrack(currentIdx); });
-    navigator.mediaSession.setActionHandler('previoustrack',() => { currentIdx = (currentIdx - 1 + ch().shuffled.length) % ch().shuffled.length; playTrack(currentIdx); });
-    return el;
-  })();
+  // ── Volume ───────────────────────────────────────────────
+  volSlider.addEventListener('input', e => {
+    userVolume = parseInt(e.target.value);
+    if (!switching) active().widget.setVolume(userVolume);
+  });
 
-  function updateMediaSession(title) {
-    if (!('mediaSession' in navigator)) return;
-    if (silentAudio?.paused) silentAudio.play().catch(() => {});
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title:  title || 'bichradio',
-      artist: 'bichradio',
-      album:  activeId === 'sexy' ? 'sexy' : 'class',
-      artwork: [
-        { src: 'https://bichradio.com/icon-192.png', sizes: '192x192', type: 'image/png' },
-        { src: 'https://bichradio.com/icon-512.png', sizes: '512x512', type: 'image/png' }
-      ]
+  setInterval(() => {
+    if (switching) return;
+    active().widget.getVolume(v => {
+      const r = Math.round(v);
+      if (Math.abs(r - userVolume) > 2) { userVolume = r; volSlider.value = r; }
     });
-    navigator.mediaSession.playbackState = 'playing';
-  }
+  }, 700);
 
-  function pauseMediaSession() {
-    if (!('mediaSession' in navigator)) return;
-    navigator.mediaSession.playbackState = 'paused';
-    if (silentAudio && !silentAudio.paused) silentAudio.pause();
-  }
-
-  // ── Visit counter (GitHub Gist) ───────────────────────────
+  // ── Visit counter (GitHub Gist) ──────────────────────────
+  // Increments every time the page loads
   const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
   const GH_TOKEN   = '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';
   const GIST_FILE = 'bichradio-counter.json';
@@ -788,6 +923,150 @@
   }
 
   incrementCounter();
+
+  // ── Hide volume bar on mobile/PWA ────────────────────────
+  (function() {
+    const isMobile  = /iphone|ipad|ipod|android/i.test(navigator.userAgent);
+    const isPWA     = window.matchMedia('(display-mode: standalone)').matches
+                   || window.navigator.standalone === true;
+    if (isMobile || isPWA) {
+      document.querySelector('.volume-row').classList.add('hidden');
+    }
+  })();
+
+  // ── PWA install banner ───────────────────────────────────
+  (function() {
+    const banner  = document.getElementById('pwa-banner');
+    const dismiss = document.getElementById('pwa-dismiss');
+    const STORAGE_KEY = 'bichradio-pwa-dismissed';
+
+    // Don't show if already dismissed, or already running as installed PWA
+    const isInstalled = window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+    const wasDismissed = sessionStorage.getItem(STORAGE_KEY);
+
+    if (isInstalled || wasDismissed) return;
+
+    const ua = navigator.userAgent;
+    const isIOS     = /iphone|ipad|ipod/i.test(ua) && !/crios/i.test(ua);
+    const isAndroid = /android/i.test(ua);
+    const isMobile  = isIOS || isAndroid;
+    const isSafari  = isIOS && /safari/i.test(ua) && !/fxios/i.test(ua);
+
+    // iOS: only show in Safari (Chrome on iOS can't install PWAs)
+    // Android: show in any mobile browser
+    if (!isMobile) return;
+    if (isIOS && !isSafari) return;
+
+    banner.classList.add('visible');
+    banner.classList.add(isIOS ? 'ios' : 'android');
+
+    // Android: intercept the beforeinstallprompt for a native prompt
+    let deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      deferredPrompt = e;
+    });
+
+    // Tapping the banner body on Android triggers native install prompt
+    banner.addEventListener('click', async e => {
+      if (e.target === dismiss) return;
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') hideBanner();
+        deferredPrompt = null;
+      }
+      // iOS: tapping does nothing extra — user follows the text instructions
+    });
+
+    dismiss.addEventListener('click', hideBanner);
+
+    // Auto-hide after 12 seconds
+    setTimeout(hideBanner, 12000);
+
+    function hideBanner() {
+      sessionStorage.setItem(STORAGE_KEY, '1');
+      banner.style.transition = 'opacity 0.4s, transform 0.4s';
+      banner.style.opacity    = '0';
+      banner.style.transform  = 'translateY(100%)';
+      setTimeout(() => banner.remove(), 400);
+    }
+  })();
+
+  // ── Media Session (lock screen) ──────────────────────────
+  // The browser only assigns MediaSession to pages that own a native <audio>
+  // element. Since our audio lives in a cross-origin SC iframe, we play a
+  // silent looping tone from THIS page to claim the session, then set our
+  // metadata on top of it.
+  const silentAudio = (function() {
+    if (!('mediaSession' in navigator)) return null;
+
+    // 1-second silent MP3 as a data URI (44 bytes, valid file)
+    const SILENT = 'data:audio/mpeg;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA//////////////////////////////////////////////////////////////////8AAAA5TEVER' +
+      'AAAAB0ZvciBtb3JlIGluZm9ybWF0aW9uIGFib3V0IFRoaXMgZmlsZSwgdmlzaXQgdGhlIExhbWUgaG9tZXBhZ2Uu//uSxAACAABoBAAAACAADSAAAAETEFNRTMuOTlyBYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+
+    const el = document.createElement('audio');
+    el.src    = SILENT;
+    el.loop   = true;
+    el.volume = 0.001; // near-silent but non-zero — browser needs actual audio output
+    document.body.appendChild(el);
+
+    // Register action handlers once
+    const ch = () => channels[activeId];
+
+    navigator.mediaSession.setActionHandler('play', () => {
+      const c = ch();
+      c.widget.setVolume(userVolume);
+      reliablePlay(c.widget);
+      el.play().catch(() => {});
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      ch().widget.pause();
+      el.pause();
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', () => {
+      currentIdx = (currentIdx + 1) % ch().shuffled.length;
+      playTrack(currentIdx);
+    });
+    navigator.mediaSession.setActionHandler('previoustrack', () => {
+      currentIdx = (currentIdx - 1 + ch().shuffled.length) % ch().shuffled.length;
+      playTrack(currentIdx);
+    });
+
+    return el;
+  })();
+
+  function updateMediaSession(title) {
+    if (!('mediaSession' in navigator)) return;
+
+    // Start silent audio to claim the session (needs user gesture, already happened)
+    if (silentAudio && silentAudio.paused) {
+      silentAudio.play().catch(() => {});
+    }
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title:  title || 'bichradio',
+      artist: 'bichradio',
+      album:  activeId === 'sexy' ? 'sexy' : 'class',
+      artwork: [
+        { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+        { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
+      ]
+    });
+    navigator.mediaSession.playbackState = 'playing';
+  }
+
+  function pauseMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = 'paused';
+    if (silentAudio && !silentAudio.paused) silentAudio.pause();
+  }
+
+  // ── Service worker ───────────────────────────────────────
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(console.warn);
+  }
 </script>
 </body>
 </html>
