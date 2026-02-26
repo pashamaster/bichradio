@@ -442,7 +442,7 @@
 </div>
 
 <iframe id="sc-widget-sexy"
-  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=true&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
+  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
   allow="autoplay">
 </iframe>
 <iframe id="sc-widget-class"
@@ -590,7 +590,6 @@
         ch.widget.getCurrentSound(s => { if (s) setTitle(s.title); });
         setStatus('');
         setTimeout(() => doSeek(ch.widget), 400);
-        incrementCounter();
 
         // ── Lock screen / notification metadata ──────────────
         if ('mediaSession' in navigator) {
@@ -762,11 +761,10 @@
   }, 700);
 
   // ── Visit counter (GitHub Gist) ──────────────────────────
- const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
+  // Increments every time the page loads
+   const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
   const GH_TOKEN   = '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';
   const GIST_FILE = 'bichradio-counter.json';
-  let counted     = false;
-  let countQueued = false;
 
   async function gistRequest(method, body) {
     return fetch(`https://api.github.com/gists/${GIST_ID}`, {
@@ -780,35 +778,21 @@
     });
   }
 
-  async function loadCounter() {
-    try {
-      const res  = await gistRequest('GET');
-      if (!res.ok) return;
-      const data = await res.json();
-      const val  = JSON.parse(data.files[GIST_FILE].content);
-      document.getElementById('counter-value').textContent = (val.count || 0).toLocaleString();
-    } catch(e) {}
-  }
-
   async function incrementCounter() {
-    if (counted || countQueued) return;
-    countQueued = true;
     try {
       const res      = await gistRequest('GET');
-      if (!res.ok) throw new Error();
+      if (!res.ok) return;
       const data     = await res.json();
       const current  = JSON.parse(data.files[GIST_FILE].content);
       const newCount = (current.count || 0) + 1;
-      const writeRes = await gistRequest('PATCH', {
+      await gistRequest('PATCH', {
         files: { [GIST_FILE]: { content: JSON.stringify({ count: newCount }) } }
       });
-      if (!writeRes.ok) throw new Error();
-      counted = true;
       document.getElementById('counter-value').textContent = newCount.toLocaleString();
-    } catch(e) { countQueued = false; }
+    } catch(e) {}
   }
 
-  loadCounter();
+  incrementCounter();
 
   // ── Hide volume bar on mobile/PWA ────────────────────────
   (function() {
