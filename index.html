@@ -452,6 +452,24 @@
 
 <script src="https://w.soundcloud.com/player/api.js"></script>
 <script>
+  // ── Version check — auto-reload if stale ─────────────────
+  const PAGE_VERSION = '1772090907';
+  (async function checkVersion() {
+    try {
+      const res  = await fetch('/version.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.version && data.version !== PAGE_VERSION) {
+        // New deploy detected — wipe caches and reload once
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        }
+        location.reload(true);
+      }
+    } catch(e) {}
+  })();
+
   // ── Visualizer bars ──────────────────────────────────────
   const viz = document.getElementById('visualizer');
   for (let i = 0; i < 22; i++) {
@@ -762,8 +780,8 @@
 
   // ── Visit counter (GitHub Gist) ──────────────────────────
   // Increments every time the page loads
-   const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
-  const GH_TOKEN   = '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';
+  const GIST_ID   = '81efc77d0223e4f68efb043a0527411b';
+  const GH_TOKEN  = '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';
   const GIST_FILE = 'bichradio-counter.json';
 
   async function gistRequest(method, body) {
