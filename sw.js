@@ -8,6 +8,7 @@ const AUDIO_CACHE = 'bichradio-audio-v2';
 const AUDIO_MAX_BYTES = 3 * 1024 * 1024; // 3 MB hard cap
 
 const SHELL_ASSETS = ['/', '/index.html', '/manifest.json'];
+// version.json is intentionally excluded — always fetched fresh
 
 // ── Install: pre-cache shell assets ──────────────────────
 self.addEventListener('install', e => {
@@ -126,6 +127,12 @@ async function cacheAudioResponse(request, networkResponse) {
 // ── Fetch handler ─────────────────────────────────────────
 self.addEventListener('fetch', e => {
   const url = e.request.url;
+
+  // version.json — always network, never cache
+  if (url.includes('version.json')) {
+    e.respondWith(fetch(e.request, { cache: 'no-store' }));
+    return;
+  }
 
   // App shell — cache first
   if (isShellAsset(url)) {

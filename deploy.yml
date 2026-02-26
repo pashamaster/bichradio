@@ -24,6 +24,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Stamp version
+        run: |
+          VERSION=$(date +%s)
+          echo "{\"version\":\"$VERSION\"}" > version.json
+          sed -i "s/const PAGE_VERSION = '[^']*'/const PAGE_VERSION = '$VERSION'/" index.html
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
