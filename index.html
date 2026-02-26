@@ -367,22 +367,93 @@
     viz.appendChild(b);
   }
 
-  // ── State ────────────────────────────────────────────────
+  // ── Core refs ────────────────────────────────────────────
   const iframe    = document.getElementById('sc-widget');
   const widget    = SC.Widget(iframe);
   const volSlider = document.getElementById('volume');
 
-  let isPlaying  = false;
-  let tracks     = [];
-  let currentIdx = 0;
-  let shuffled   = [];
-  let userVolume = 80;
-  let switching  = false;
-  let fadeTimer  = null;
+  // ── State ────────────────────────────────────────────────
+  let isPlaying   = false;
+  let tracks      = [];
+  let shuffled    = [];
+  let currentIdx  = 0;
+  let userVolume  = 80;   // 0–100, the user's chosen level
+  let switching   = false;
+  let playRetry   = null; // retry interval handle
+  let gainNode    = null; // Web Audio GainNode — used for smooth fading
+  let audioCtx    = null;
 
-  const SEEK_MIN = 23 * 60 * 1000;
-  const SEEK_MAX = 43 * 60 * 1000;
-  const FADE_MS  = 2500;
+  const SEEK_MIN  = 23 * 60 * 1000;
+  const SEEK_MAX  = 43 * 60 * 1000;
+  const FADE_SECS = 2.5; // seconds for fade in/out
+
+  // ── Web Audio setup ──────────────────────────────────────
+  // We route the iframe's audio through a GainNode so we can
+  // do frame-accurate, lag-free fades without postMessage queuing.
+  function setupAudioContext() {
+    try {
+      if (audioCtx) return;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+      gainNode = audioCtx.createGain();
+      gainNode.gain.value = userVolume / 100;
+      gainNode.connect(audioCtx.destination);
+
+      // Find the <audio> element inside the iframe and route it
+      const tryConnect = () => {
+        try {
+          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+          const audio = iframeDoc.querySelector('audio');
+          if (audio) {
+            const src = audioCtx.createMediaElementSource(audio);
+            src.connect(gainNode);
+            // Now we control volume via gainNode, not widget.setVolume
+            widget.setVolume(100); // keep widget at max; we control gain
+          }
+        } catch(e) {
+          // Cross-origin: can't access iframe DOM — fall back to widget.setVolume
+          gainNode = null;
+          audioCtx = null;
+        }
+      };
+
+      iframe.addEventListener('load', tryConnect);
+      setTimeout(tryConnect, 2000);
+    } catch(e) {}
+  }
+
+  // ── Fade via GainNode (frame-perfect) or fallback ────────
+  function fadeGain(fromVal, toVal, secs, onDone) {
+    if (gainNode && audioCtx) {
+      audioCtx.resume();
+      const now = audioCtx.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(fromVal / 100, now);
+      // Exponential ramp sounds more natural than linear
+      // (can't ramp to 0, so use 0.001 as "silence")
+      const target = toVal <= 0 ? 0.001 : toVal / 100;
+      gainNode.gain.exponentialRampToValueAtTime(target, now + secs);
+      if (toVal <= 0) {
+        // After ramp, hard-set to 0
+        gainNode.gain.setValueAtTime(0, now + secs);
+      }
+      setTimeout(onDone, secs * 1000 + 50);
+    } else {
+      // Fallback: postMessage-based with reduced step count to avoid queue backlog
+      const steps    = 20; // fewer steps = less queue buildup
+      const interval = (secs * 1000) / steps;
+      let step = 0;
+      const timer = setInterval(() => {
+        step++;
+        const t    = step / steps;
+        const ease = fromVal > toVal ? t * t : 1 - (1 - t) * (1 - t);
+        const vol  = Math.round(fromVal + (toVal - fromVal) * ease);
+        widget.setVolume(Math.max(0, Math.min(100, vol)));
+        if (step >= steps) { clearInterval(timer); onDone(); }
+      }, interval);
+    }
+  }
 
   // ── Helpers ──────────────────────────────────────────────
   function shuffle(arr) {
@@ -407,136 +478,188 @@
     document.getElementById('icon-pause').style.display = playing ? '' : 'none';
   }
 
-  // ── Fade: returns a cancellable promise ──────────────────
-  function fadeVolume(fromVol, toVol, ms) {
-    if (fadeTimer) { clearInterval(fadeTimer); fadeTimer = null; }
-    return new Promise(resolve => {
-      const steps    = 50;
-      const interval = ms / steps;
-      // Use easing: ease-in for fade-out, ease-out for fade-in
-      let step = 0;
-      fadeTimer = setInterval(() => {
-        step++;
-        const t    = step / steps;
-        // Smooth cubic easing
-        const ease = fromVol > toVol ? t * t * t : 1 - Math.pow(1 - t, 3);
-        const vol  = Math.round(fromVol + (toVol - fromVol) * ease);
-        widget.setVolume(Math.max(0, Math.min(100, vol)));
-        if (step >= steps) {
-          clearInterval(fadeTimer);
-          fadeTimer = null;
-          resolve();
-        }
-      }, interval);
+  function applyVolume() {
+    if (gainNode && audioCtx) {
+      gainNode.gain.cancelScheduledValues(audioCtx.currentTime);
+      gainNode.gain.setValueAtTime(userVolume / 100, audioCtx.currentTime);
+    } else {
+      widget.setVolume(userVolume);
+    }
+  }
+
+  // ── Reliable play with retry ─────────────────────────────
+  // widget.play() can silently fail. We verify playback started
+  // and retry every 800ms until confirmed or timeout (5s).
+  function reliablePlay(onConfirmed) {
+    clearInterval(playRetry);
+    let attempts = 0;
+    const maxAttempts = 6;
+
+    const attempt = () => {
+      if (isPlaying) { clearInterval(playRetry); playRetry = null; if (onConfirmed) onConfirmed(); return; }
+      if (attempts >= maxAttempts) { clearInterval(playRetry); playRetry = null; setStatus('tap play to start'); return; }
+      attempts++;
+      widget.play();
+    };
+
+    attempt();
+    playRetry = setInterval(attempt, 800);
+  }
+
+  // ── Seek into 23–43 min range ────────────────────────────
+  function doSeek() {
+    widget.getDuration(d => {
+      if (!d) return;
+      const seekTo = d > SEEK_MAX
+        ? SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN))
+        : Math.floor(d * 0.4);
+      widget.seekTo(seekTo);
     });
   }
 
-  // ── Play a track, seeking into 23–43 min range ───────────
-  function playTrack(idx, doSeek = true) {
+  // ── Play a track ─────────────────────────────────────────
+  function playTrack(idx) {
+    clearInterval(playRetry);
     widget.skip(shuffled[idx]);
-    widget.play();
-    if (doSeek) {
-      // Seek after a short buffer — avoids fighting with the widget's own seek on skip
-      setTimeout(() => {
-        widget.getDuration(d => {
-          if (!d) return;
-          const seekTo = d > SEEK_MAX
-            ? SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN))
-            : Math.floor(d * 0.4);
-          widget.seekTo(seekTo);
-        });
-      }, 600);
-    }
+    // Seek happens after PLAY event fires (track is ready)
+    reliablePlay();
   }
 
   // ── Channel switch ───────────────────────────────────────
-  async function switchPlaylist(encodedUrl) {
+  // Key insight: we do the fade BEFORE the user gesture window expires.
+  // The gesture is the button click. We must call iframe.src= synchronously
+  // or very quickly. So: start fade, but also immediately swap the src.
+  // The fade runs over the old audio while the new playlist loads.
+  function switchPlaylist(encodedUrl) {
     if (switching) return;
     switching = true;
+    clearInterval(playRetry);
     document.querySelectorAll('.pl-btn').forEach(b => b.disabled = true);
+    setStatus('switching…');
 
-    // 1. Fade out current audio (only if playing)
-    if (isPlaying) {
-      await fadeVolume(userVolume, 0, FADE_MS);
+    const wasPlaying = isPlaying;
+
+    // Start fade-out immediately (runs in parallel with iframe load)
+    if (wasPlaying && gainNode) {
+      fadeGain(userVolume, 0, FADE_SECS, () => {});
+    } else if (wasPlaying) {
+      fadeGain(userVolume, 0, FADE_SECS, () => {});
     }
-    widget.pause();
 
-    // Reset state
+    // Also immediately swap iframe — browser needs the gesture context NOW
+    // We set volume=0 so there's no audio pop when it starts
+    widget.setVolume(0);
+    if (gainNode && audioCtx) {
+      gainNode.gain.cancelScheduledValues(audioCtx.currentTime);
+      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+    }
+
+    // Clear PWA caches async (doesn't block anything)
+    if ('caches' in window) {
+      caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).catch(() => {});
+    }
+
+    // Swap iframe src immediately to preserve gesture context
+    const params = '&auto_play=true&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false';
+    iframe.src = 'https://w.soundcloud.com/player/?url=' + encodedUrl + params;
+
+    // Reset display state
     isPlaying = false;
     tracks = []; shuffled = []; currentIdx = 0;
     viz.classList.add('paused');
     setPlayIcon(false);
     setTitle('—');
-    setStatus('switching…');
-
-    // 2. Clear PWA caches to prevent audio buffering lag
-    if ('caches' in window) {
-      try {
-        const keys = await caches.keys();
-        await Promise.all(keys.map(k => caches.delete(k)));
-      } catch(e) {}
-    }
-
-    // 3. Load new playlist at volume 0, auto_play=true
-    //    The READY handler below will start playback and fade in
-    widget.setVolume(0);
-    const params = '&auto_play=true&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false';
-    iframe.src = 'https://w.soundcloud.com/player/?url=' + encodedUrl + params;
-    // switching=true signals READY to auto-play + fade in
+    // READY will handle the rest
   }
 
-  // ── Register all widget events (called once and after each reload) ──
-  function bindWidgetEvents() {
+  // ── Widget events ────────────────────────────────────────
+  let eventsRegistered = false;
+
+  function bindEvents() {
+    if (eventsRegistered) return;
+    eventsRegistered = true;
+
     widget.bind(SC.Widget.Events.PLAY, () => {
-      isPlaying = true;
-      viz.classList.remove('paused');
-      setPlayIcon(true);
-      widget.getCurrentSound(s => { if (s) setTitle(s.title); setStatus(''); });
+      if (!isPlaying) {
+        isPlaying = true;
+        viz.classList.remove('paused');
+        setPlayIcon(true);
+        widget.getCurrentSound(s => { if (s) setTitle(s.title); });
+        setStatus('');
+        // Seek into range on first play of a track
+        setTimeout(doSeek, 300);
+      }
     });
 
     widget.bind(SC.Widget.Events.PAUSE, () => {
-      isPlaying = false;
-      viz.classList.add('paused');
-      setPlayIcon(false);
+      // Only mark as paused if not in the middle of a switch
+      if (!switching) {
+        isPlaying = false;
+        viz.classList.add('paused');
+        setPlayIcon(false);
+      }
     });
 
     widget.bind(SC.Widget.Events.FINISH, () => {
+      isPlaying = false;
       currentIdx = (currentIdx + 1) % shuffled.length;
       playTrack(currentIdx);
     });
 
     widget.bind(SC.Widget.Events.ERROR, () => {
+      isPlaying = false;
       setStatus('stream error — skipping…');
-      setTimeout(() => { currentIdx = (currentIdx + 1) % shuffled.length; playTrack(currentIdx); }, 1500);
+      setTimeout(() => { currentIdx = (currentIdx + 1) % shuffled.length; playTrack(currentIdx); }, 1000);
     });
   }
 
-  // ── READY fires on first load and after each iframe src change ──
+  // ── READY ────────────────────────────────────────────────
   widget.bind(SC.Widget.Events.READY, () => {
-    bindWidgetEvents();
+    bindEvents();
+    setupAudioContext();
 
     widget.getSounds(sounds => {
-      if (!sounds.length) { setStatus('no tracks found'); switching = false; return; }
+      if (!sounds.length) { setStatus('no tracks found'); switching = false; document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false); return; }
       tracks   = sounds;
       shuffled = shuffle(sounds.map((_, i) => i));
-      setTitle(tracks[shuffled[0]].title);
 
       if (switching) {
-        // Channel switch: widget already auto-playing at vol=0
-        // seek into range, then fade in
+        // New playlist loaded — it's already auto-playing at gain=0
+        // Wait for PLAY event to confirm, then fade in
+        setTitle(tracks[shuffled[0]].title);
         setStatus('');
-        playTrack(currentIdx);
-        // Fade in after seek settles (seek takes ~600ms, so wait 800ms total)
+
+        // Wait for play to confirm (via PLAY event or timeout) then fade in
+        const waitForPlay = setInterval(() => {
+          if (isPlaying) {
+            clearInterval(waitForPlay);
+            // Fade in
+            fadeGain(0, userVolume, FADE_SECS, () => {
+              switching = false;
+              document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
+            });
+          }
+        }, 200);
+
+        // Safety timeout: if play didn't start in 4s, retry
         setTimeout(() => {
-          fadeVolume(0, userVolume, FADE_MS).then(() => {
-            switching = false;
-            document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
-          });
-        }, 800);
+          clearInterval(waitForPlay);
+          if (!isPlaying) {
+            widget.play();
+            setTimeout(() => {
+              fadeGain(0, userVolume, FADE_SECS, () => {
+                switching = false;
+                document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
+              });
+            }, 500);
+          }
+        }, 4000);
+
       } else {
-        // First page load
+        // Initial page load
+        setTitle(tracks[shuffled[0]].title);
         setStatus(`${tracks.length} tracks · tap play`);
-        widget.setVolume(userVolume);
+        applyVolume();
       }
     });
   });
@@ -551,14 +674,16 @@
     });
   });
 
-  // ── Playback controls ────────────────────────────────────
+  // ── Play / Pause button ───────────────────────────────────
   document.getElementById('btn-play').addEventListener('click', () => {
     if (switching) return;
+    if (audioCtx) audioCtx.resume();
     if (isPlaying) {
+      clearInterval(playRetry);
       widget.pause();
     } else {
       if (!tracks.length) { setStatus('loading…'); return; }
-      widget.setVolume(userVolume);
+      applyVolume();
       playTrack(currentIdx);
       incrementCounter();
     }
@@ -579,20 +704,17 @@
   // ── Volume slider ────────────────────────────────────────
   volSlider.addEventListener('input', e => {
     userVolume = parseInt(e.target.value);
-    if (!switching) widget.setVolume(userVolume);
+    if (!switching) applyVolume();
   });
 
   // Sync slider with iOS hardware volume buttons
   setInterval(() => {
-    if (switching) return;
+    if (switching || gainNode) return; // gainNode = we control volume ourselves
     widget.getVolume(v => {
-      const rounded = Math.round(v);
-      if (Math.abs(rounded - userVolume) > 2) {
-        userVolume = rounded;
-        volSlider.value = rounded;
-      }
+      const r = Math.round(v);
+      if (Math.abs(r - userVolume) > 2) { userVolume = r; volSlider.value = r; }
     });
-  }, 600);
+  }, 700);
 
   // ── Visit counter (GitHub Gist) ──────────────────────────
   const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
@@ -633,9 +755,7 @@
       const newCount = (current.count || 0) + 1;
       document.getElementById('counter-value').textContent = newCount.toLocaleString();
       await gistRequest('PATCH', { files: { [GIST_FILE]: { content: JSON.stringify({ count: newCount }) } } });
-    } catch(e) {
-      counted = false;
-    }
+    } catch(e) { counted = false; }
   }
 
   loadCounter();
