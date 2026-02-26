@@ -591,6 +591,26 @@
         setStatus('');
         setTimeout(() => doSeek(ch.widget), 400);
         incrementCounter();
+
+        // ── Lock screen / notification metadata ──────────────
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title:  ch.tracks[ch.shuffled[currentIdx]]?.title || 'bichradio',
+            artist: 'bichradio',
+            album:  activeId === 'sexy' ? 'sexy' : 'class',
+            artwork: [
+              { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+              { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
+            ]
+          });
+          navigator.mediaSession.playbackState = 'playing';
+
+          // Wire lock screen controls to the player
+          navigator.mediaSession.setActionHandler('play',         () => { ch.widget.setVolume(userVolume); reliablePlay(ch.widget); });
+          navigator.mediaSession.setActionHandler('pause',        () => { ch.widget.pause(); });
+          navigator.mediaSession.setActionHandler('nexttrack',    () => { currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); });
+          navigator.mediaSession.setActionHandler('previoustrack',() => { currentIdx = (currentIdx - 1 + ch.shuffled.length) % ch.shuffled.length; playTrack(currentIdx); });
+        }
       }
       // If this PLAY is from a channel switch, fade in
       if (switching) {
@@ -606,6 +626,7 @@
       isPlaying = false;
       viz.classList.add('paused');
       setPlayIcon(false);
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
     });
 
     ch.widget.bind(SC.Widget.Events.FINISH, () => {
