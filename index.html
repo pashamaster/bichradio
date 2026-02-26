@@ -554,9 +554,11 @@
       gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
     }
 
-    // Clear PWA caches async (doesn't block anything)
-    if ('caches' in window) {
-      caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).catch(() => {});
+    // Clear only the audio cache via SW message (preserves shell cache)
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage('CLEAR_AUDIO_CACHE');
+    } else if ('caches' in window) {
+      caches.delete('bichradio-audio-v2').catch(() => {});
     }
 
     // Swap iframe src immediately to preserve gesture context
@@ -719,7 +721,7 @@
 
   // ── Visit counter (GitHub Gist) ──────────────────────────
   // Counts once per session when playback actually starts (PLAY event fires)
-  const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
+ const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
   const GH_TOKEN   = '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';
   const GIST_FILE = 'bichradio-counter.json';
   let counted     = false;
