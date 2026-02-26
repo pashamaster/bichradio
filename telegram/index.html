@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>bichradio</title>
+
+  <!-- Telegram Mini App SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500&family=Playfair+Display:ital@0;1&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg:      #0a0a0a;
+      --surface: #111111;
+      --border:  rgba(255,255,255,0.07);
+      --text:    #e8e2d9;
+      --muted:   rgba(232,226,217,0.35);
+      --accent:  #c8a96e;
+      --red:     #e05252;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      /* Use Telegram's background color if available, fallback to our dark */
+      background: var(--tg-theme-bg-color, var(--bg));
+      color: var(--text);
+      font-family: 'Geist Mono', monospace;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      /* Prevent elastic scroll bounce in Telegram WebView */
+      overscroll-behavior: none;
+    }
+
+    /* Grain overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+      opacity: 0.028;
+      pointer-events: none;
+      z-index: 1000;
+    }
+
+    .app {
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      /* Respect Telegram's safe area insets */
+      padding-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px));
+      padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 28px 0;
+    }
+
+    .logo {
+      font-family: 'Playfair Display', serif;
+      font-style: italic;
+      font-size: 1.1rem;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+    }
+
+    .live-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.6rem;
+      letter-spacing: 0.18em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .live-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 8px var(--red);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--red); }
+      50%       { opacity: 0.4; box-shadow: 0 0 2px var(--red); }
+    }
+
+    .center {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 0 28px;
+      gap: 36px;
+    }
+
+    /* Visualizer */
+    .visualizer {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 44px;
+      opacity: 0.5;
+    }
+
+    .bar {
+      width: 3px;
+      border-radius: 2px;
+      background: var(--accent);
+      animation: bounce var(--d) ease-in-out infinite alternate;
+      transform-origin: bottom;
+    }
+
+    @keyframes bounce {
+      from { transform: scaleY(0.1); }
+      to   { transform: scaleY(1); }
+    }
+
+    .visualizer.paused .bar { animation-play-state: paused; transform: scaleY(0.1); }
+
+    .track-info {
+      text-align: center;
+      max-width: 300px;
+      width: 100%;
+    }
+
+    .track-label {
+      font-size: 0.55rem;
+      letter-spacing: 0.22em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .track-title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.1rem, 5vw, 1.6rem);
+      line-height: 1.35;
+      color: var(--text);
+      min-height: 2.7em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.4s ease;
+    }
+
+    .track-title.fading { opacity: 0; }
+
+    /* Channel buttons */
+    .playlist-btns {
+      display: flex;
+      gap: 12px;
+    }
+
+    .pl-btn {
+      font-family: 'Geist Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 8px 22px;
+      border-radius: 2px;
+      cursor: pointer;
+      transition: all 0.2s;
+      /* Telegram touch — bigger tap target */
+      min-height: 40px;
+    }
+
+    .pl-btn:hover   { border-color: var(--accent); color: var(--accent); }
+    .pl-btn.active  { border-color: var(--accent); color: var(--accent); background: rgba(200,169,110,0.07); }
+    .pl-btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+
+    /* Controls */
+    .controls {
+      padding: 0 28px 32px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 22px;
+    }
+
+    .main-controls {
+      display: flex;
+      align-items: center;
+      gap: 36px;
+    }
+
+    .btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+      transition: color 0.2s, transform 0.15s;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      /* Larger tap target for Telegram */
+      min-width: 44px;
+      min-height: 44px;
+    }
+
+    .btn:active { transform: scale(0.92); color: var(--text); }
+
+    .btn-play {
+      width: 64px; height: 64px;
+      border-radius: 50%;
+      border: 1px solid var(--border) !important;
+      background: var(--surface) !important;
+      color: var(--text);
+      transition: all 0.15s;
+    }
+
+    .btn-play:active {
+      border-color: var(--accent) !important;
+      color: var(--accent);
+      transform: scale(0.94);
+    }
+
+    .loading-msg {
+      font-size: 0.65rem;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-align: center;
+      min-height: 1em;
+    }
+
+    .counter-wrap {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .counter-label {
+      font-size: 0.55rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: rgba(232,226,217,0.2);
+    }
+
+    .counter-value {
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      color: rgba(232,226,217,0.35);
+    }
+
+    /* Hidden SC iframes */
+    #sc-widget-sexy, #sc-widget-class {
+      position: absolute;
+      width: 1px; height: 1px;
+      opacity: 0;
+      pointer-events: none;
+      bottom: 0; left: 0;
+    }
+
+    @keyframes fadein {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .app { animation: fadein 0.6s ease both; }
+
+    /* Telegram haptic ripple on button tap */
+    @keyframes ripple {
+      from { transform: scale(0.9); opacity: 0.6; }
+      to   { transform: scale(1);   opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">bichradio</div>
+    <div class="live-badge">
+      <div class="live-dot"></div>
+      <span>on air</span>
+    </div>
+  </header>
+
+  <div class="center">
+    <div class="visualizer paused" id="visualizer"></div>
+
+    <div class="track-info">
+      <div class="track-label">now playing</div>
+      <div class="track-title" id="track-title">—</div>
+    </div>
+
+    <div class="playlist-btns">
+      <button class="pl-btn" id="btn-class">class</button>
+      <button class="pl-btn active" id="btn-sexy">sexy</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="main-controls">
+      <button class="btn" id="btn-prev" title="Previous">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+      </button>
+      <button class="btn btn-play" id="btn-play" title="Play/Pause">
+        <svg id="icon-play" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="icon-pause" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      </button>
+      <button class="btn" id="btn-next" title="Next">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2-8.14 5.25 3.64L8 16.14V9.86zM16 6h2v12h-2z"/></svg>
+      </button>
+    </div>
+    <div class="loading-msg" id="status-msg">tap play to start</div>
+    <div class="counter-wrap">
+      <span class="counter-label">tuned in</span>
+      <span class="counter-value" id="counter-value">—</span>
+      <span class="counter-label">times</span>
+    </div>
+  </div>
+</div>
+
+<iframe id="sc-widget-sexy"
+  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
+  allow="autoplay">
+</iframe>
+<iframe id="sc-widget-class"
+  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/class&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
+  allow="autoplay">
+</iframe>
+
+<script src="https://w.soundcloud.com/player/api.js"></script>
+<script>
+  // ── Telegram WebApp init ──────────────────────────────────
+  const tg = window.Telegram?.WebApp;
+  if (tg) {
+    tg.ready();
+    tg.expand(); // full screen
+    tg.disableVerticalSwipes(); // prevent accidental close on swipe
+    // Force dark background matching our theme
+    if (tg.setBackgroundColor) tg.setBackgroundColor('#0a0a0a');
+    if (tg.setHeaderColor)     tg.setHeaderColor('#0a0a0a');
+  }
+
+  // Telegram haptic feedback helper
+  const haptic = {
+    light:   () => tg?.HapticFeedback?.impactOccurred('light'),
+    medium:  () => tg?.HapticFeedback?.impactOccurred('medium'),
+    success: () => tg?.HapticFeedback?.notificationOccurred('success'),
+    error:   () => tg?.HapticFeedback?.notificationOccurred('error'),
+    select:  () => tg?.HapticFeedback?.selectionChanged()
+  };
+
+  // ── Visualizer bars ───────────────────────────────────────
+  const viz = document.getElementById('visualizer');
+  for (let i = 0; i < 22; i++) {
+    const b = document.createElement('div');
+    b.className = 'bar';
+    b.style.cssText = `--d:${(0.4 + Math.random() * 0.7).toFixed(2)}s; height:${8 + Math.floor(Math.random() * 40)}px;`;
+    viz.appendChild(b);
+  }
+
+  // ── SoundCloud availability — 3-level check ───────────────
+  const BLOCKED_COUNTRIES  = ['RU', 'BY', 'KP', 'IR', 'CU', 'SY'];
+  const MIXCLOUD_CLASS_URL = 'https://www.mixcloud.com/pashakaef/playlists/class/';
+  let   scBlocked          = false;
+  let   blockScore         = 0;
+
+  async function checkLevel1_Geo() {
+    try {
+      const res = await Promise.race([
+        fetch('https://ipapi.co/json/', { cache: 'no-store' }),
+        new Promise((_, rej) => setTimeout(() => rej('timeout'), 4000))
+      ]);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (BLOCKED_COUNTRIES.includes(data.country_code)) {
+        blockScore++;
+        console.log('[bichradio] Level 1: geo blocked —', data.country_code);
+      }
+    } catch(e) {}
+  }
+
+  async function checkLevel2_Network() {
+    try {
+      const ctrl  = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const res   = await fetch('https://w.soundcloud.com/player/api.js', {
+        method: 'HEAD', cache: 'no-store', signal: ctrl.signal
+      });
+      clearTimeout(timer);
+      if (!res.ok) { blockScore++; console.log('[bichradio] Level 2: SC unreachable', res.status); }
+    } catch(e) {
+      blockScore++;
+      console.log('[bichradio] Level 2: SC fetch failed');
+    }
+  }
+
+  async function runAvailabilityChecks() {
+    await Promise.all([checkLevel1_Geo(), checkLevel2_Network()]);
+    setTimeout(evaluateBlock, 7000);
+  }
+
+  function evaluateBlock() {
+    if (scBlocked) return;
+    if (blockScore >= 2) {
+      scBlocked = true;
+      console.log('[bichradio] SC blocked — switching class to Mixcloud');
+      switchClassToMixcloud();
+    }
+  }
+
+  function switchClassToMixcloud() {
+    const btn     = document.getElementById('btn-class');
+    const sexyBtn = document.getElementById('btn-sexy');
+    if (!btn) return;
+
+    // Smoothly hide sexy button
+    if (sexyBtn) {
+      sexyBtn.style.transition = 'opacity 0.6s ease, transform 0.6s ease, max-width 0.6s ease, padding 0.6s ease, margin 0.6s ease';
+      sexyBtn.style.opacity    = '0';
+      sexyBtn.style.transform  = 'scale(0.8)';
+      setTimeout(() => {
+        sexyBtn.style.maxWidth = '0';
+        sexyBtn.style.padding  = '0';
+        sexyBtn.style.margin   = '0';
+        sexyBtn.style.border   = 'none';
+        sexyBtn.style.overflow = 'hidden';
+      }, 600);
+    }
+
+    btn.addEventListener('click', openMixcloud, { once: false });
+    btn.dataset.mixcloud = '1';
+
+    if (activeId === 'class') {
+      active().widget.pause();
+      setStatus('SoundCloud unavailable — opening Mixcloud…');
+      setTimeout(() => {
+        // Open via Telegram's openLink for proper in-app browser
+        if (tg?.openLink) tg.openLink(MIXCLOUD_CLASS_URL);
+        else window.open(MIXCLOUD_CLASS_URL, '_blank');
+      }, 800);
+    }
+  }
+
+  function openMixcloud(e) {
+    e.stopImmediatePropagation();
+    haptic.light();
+    if (tg?.openLink) tg.openLink(MIXCLOUD_CLASS_URL);
+    else window.open(MIXCLOUD_CLASS_URL, '_blank');
+  }
+
+  runAvailabilityChecks();
+
+  // ── Two widgets, both pre-loaded silently ─────────────────
+  const channels = {
+    sexy:  { id: 'sexy',  iframe: document.getElementById('sc-widget-sexy'),  widget: null, tracks: [], shuffled: [], ready: false },
+    class: { id: 'class', iframe: document.getElementById('sc-widget-class'), widget: null, tracks: [], shuffled: [], ready: false }
+  };
+  channels.sexy.widget  = SC.Widget(channels.sexy.iframe);
+  channels.class.widget = SC.Widget(channels.class.iframe);
+
+  // ── State ─────────────────────────────────────────────────
+  let activeId   = 'sexy';
+  let isPlaying  = false;
+  let currentIdx = 0;
+  let userVolume = 80;
+  let switching  = false;
+  let playRetry  = null;
+  let didSeek    = false;
+
+  const SEEK_MIN = 23 * 60 * 1000;
+  const SEEK_MAX = 43 * 60 * 1000;
+
+  function active()   { return channels[activeId]; }
+
+  function shuffle(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  function setTitle(title) {
+    const el = document.getElementById('track-title');
+    el.classList.add('fading');
+    setTimeout(() => { el.textContent = title || '—'; el.classList.remove('fading'); }, 400);
+  }
+
+  function setStatus(msg) { document.getElementById('status-msg').textContent = msg; }
+
+  function setPlayIcon(playing) {
+    document.getElementById('icon-play').style.display  = playing ? 'none' : '';
+    document.getElementById('icon-pause').style.display = playing ? '' : 'none';
+  }
+
+  // ── Seek once per track into 23–43 min range ─────────────
+  function doSeek(w) {
+    if (didSeek) return;
+    didSeek = true;
+    w.getDuration(d => {
+      if (!d || d < 60000) return;
+      const seekTo = d > SEEK_MAX
+        ? SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN))
+        : Math.floor(d * 0.4);
+      w.seekTo(seekTo);
+    });
+  }
+
+  // ── Reliable play with retry ──────────────────────────────
+  function reliablePlay(w, onConfirmed) {
+    clearInterval(playRetry);
+    let attempts = 0;
+    const attempt = () => {
+      if (isPlaying) { clearInterval(playRetry); playRetry = null; if (onConfirmed) onConfirmed(); return; }
+      if (attempts >= 6) { clearInterval(playRetry); playRetry = null; setStatus('tap play to retry'); return; }
+      attempts++;
+      w.play();
+    };
+    attempt();
+    playRetry = setInterval(attempt, 800);
+  }
+
+  // ── Play a track ──────────────────────────────────────────
+  function playTrack(idx) {
+    didSeek = false;
+    clearInterval(playRetry);
+    const ch = active();
+    ch.widget.skip(ch.shuffled[idx]);
+    ch.widget.setVolume(userVolume);
+    reliablePlay(ch.widget);
+  }
+
+  // ── Bind events for one channel ───────────────────────────
+  function bindChannel(ch) {
+    // Level 3 check: class widget READY timeout
+    let readyTimer = null;
+    if (ch.id === 'class') {
+      readyTimer = setTimeout(() => {
+        if (!ch.ready) {
+          blockScore++;
+          console.log('[bichradio] Level 3: class READY timeout');
+          evaluateBlock();
+        }
+      }, 5000);
+    }
+
+    ch.widget.bind(SC.Widget.Events.READY, () => {
+      if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
+      ch.widget.getSounds(sounds => {
+        if (!sounds.length) return;
+        ch.tracks   = sounds;
+        ch.shuffled = shuffle(sounds.map((_, i) => i));
+        ch.ready    = true;
+        if (ch.id !== activeId) ch.widget.setVolume(0);
+      });
+    });
+
+    ch.widget.bind(SC.Widget.Events.PLAY, () => {
+      if (ch.id !== activeId) {
+        ch.widget.setVolume(0);
+        ch.widget.pause();
+        return;
+      }
+      if (!isPlaying) {
+        isPlaying = true;
+        viz.classList.remove('paused');
+        setPlayIcon(true);
+        ch.widget.getCurrentSound(s => {
+          if (s) {
+            setTitle(s.title);
+            updateMediaSession(s.title);
+          }
+        });
+        setStatus('');
+        setTimeout(() => doSeek(ch.widget), 400);
+        incrementCounter();
+      }
+      if (switching) {
+        ch.widget.setVolume(userVolume);
+        switching = false;
+        document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
+      }
+    });
+
+    ch.widget.bind(SC.Widget.Events.PAUSE, () => {
+      if (ch.id !== activeId || switching) return;
+      isPlaying = false;
+      viz.classList.add('paused');
+      setPlayIcon(false);
+      pauseMediaSession();
+    });
+
+    ch.widget.bind(SC.Widget.Events.FINISH, () => {
+      if (ch.id !== activeId) return;
+      isPlaying = false;
+      currentIdx = (currentIdx + 1) % ch.shuffled.length;
+      playTrack(currentIdx);
+    });
+
+    ch.widget.bind(SC.Widget.Events.ERROR, () => {
+      if (ch.id !== activeId) return;
+      isPlaying = false;
+      haptic.error();
+      setStatus('stream error — skipping…');
+      setTimeout(() => { currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); }, 800);
+    });
+  }
+
+  bindChannel(channels.sexy);
+  bindChannel(channels.class);
+
+  // ── Channel switch ────────────────────────────────────────
+  function switchChannel(toId) {
+    if (switching || toId === activeId) return;
+    switching = true;
+    clearInterval(playRetry);
+    document.querySelectorAll('.pl-btn').forEach(b => b.disabled = true);
+
+    const from = active();
+    const to   = channels[toId];
+
+    const startSwitch = () => {
+      to.widget.setVolume(0);
+      activeId   = toId;
+      currentIdx = 0;
+      didSeek    = false;
+      isPlaying  = false;
+
+      from.widget.setVolume(0);
+      from.widget.pause();
+
+      to.widget.skip(to.shuffled[currentIdx]);
+      reliablePlay(to.widget);
+
+      setTitle(to.tracks[to.shuffled[currentIdx]]?.title || '—');
+      setStatus('');
+      viz.classList.add('paused');
+      setPlayIcon(false);
+
+      setTimeout(() => {
+        if (switching) {
+          switching = false;
+          document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
+          if (!isPlaying) to.widget.setVolume(userVolume);
+        }
+      }, 6000);
+    };
+
+    if (to.ready) {
+      startSwitch();
+    } else {
+      setStatus('loading channel…');
+      let waited = 0;
+      const wait = setInterval(() => {
+        waited += 250;
+        if (to.ready) { clearInterval(wait); startSwitch(); }
+        else if (waited > 6000) {
+          clearInterval(wait);
+          switching = false;
+          document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
+          setStatus('channel not ready — try again');
+          haptic.error();
+        }
+      }, 250);
+    }
+  }
+
+  // ── Playlist buttons ──────────────────────────────────────
+  document.querySelectorAll('.pl-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const toId = btn.id === 'btn-sexy' ? 'sexy' : 'class';
+      if (toId === 'class' && btn.dataset.mixcloud) return;
+      if (toId === activeId || switching) return;
+      haptic.select();
+      document.querySelectorAll('.pl-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      switchChannel(toId);
+    });
+  });
+
+  // ── Playback controls ─────────────────────────────────────
+  document.getElementById('btn-play').addEventListener('click', () => {
+    if (switching) return;
+    const ch = active();
+    if (isPlaying) {
+      haptic.light();
+      clearInterval(playRetry);
+      ch.widget.pause();
+    } else {
+      if (!ch.ready) { setStatus('loading…'); return; }
+      haptic.medium();
+      ch.widget.setVolume(userVolume);
+      playTrack(currentIdx);
+    }
+  });
+
+  document.getElementById('btn-next').addEventListener('click', () => {
+    if (switching) return;
+    haptic.light();
+    const ch = active();
+    currentIdx = (currentIdx + 1) % ch.shuffled.length;
+    playTrack(currentIdx);
+  });
+
+  document.getElementById('btn-prev').addEventListener('click', () => {
+    if (switching) return;
+    haptic.light();
+    const ch = active();
+    currentIdx = (currentIdx - 1 + ch.shuffled.length) % ch.shuffled.length;
+    playTrack(currentIdx);
+  });
+
+  // ── Media Session (lock screen) ───────────────────────────
+  const silentAudio = (function() {
+    if (!('mediaSession' in navigator)) return null;
+    const SILENT = 'data:audio/mpeg;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA//////////////////////////////////////////////////////////////////8AAAA5TEVERAAAAB0ZvciBtb3JlIGluZm9ybWF0aW9uIGFib3V0IFRoaXMgZmlsZSwgdmlzaXQgdGhlIExhbWUgaG9tZXBhZ2Uu//uSxAACAABoBAAAACAADSAAAAETEFNRTMuOTlyBYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+    const el = document.createElement('audio');
+    el.src = SILENT; el.loop = true; el.volume = 0.001;
+    document.body.appendChild(el);
+    const ch = () => channels[activeId];
+    navigator.mediaSession.setActionHandler('play',         () => { ch().widget.setVolume(userVolume); reliablePlay(ch().widget); el.play().catch(() => {}); });
+    navigator.mediaSession.setActionHandler('pause',        () => { ch().widget.pause(); el.pause(); });
+    navigator.mediaSession.setActionHandler('nexttrack',    () => { currentIdx = (currentIdx + 1) % ch().shuffled.length; playTrack(currentIdx); });
+    navigator.mediaSession.setActionHandler('previoustrack',() => { currentIdx = (currentIdx - 1 + ch().shuffled.length) % ch().shuffled.length; playTrack(currentIdx); });
+    return el;
+  })();
+
+  function updateMediaSession(title) {
+    if (!('mediaSession' in navigator)) return;
+    if (silentAudio?.paused) silentAudio.play().catch(() => {});
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title:  title || 'bichradio',
+      artist: 'bichradio',
+      album:  activeId === 'sexy' ? 'sexy' : 'class',
+      artwork: [
+        { src: 'https://bichradio.com/icon-192.png', sizes: '192x192', type: 'image/png' },
+        { src: 'https://bichradio.com/icon-512.png', sizes: '512x512', type: 'image/png' }
+      ]
+    });
+    navigator.mediaSession.playbackState = 'playing';
+  }
+
+  function pauseMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = 'paused';
+    if (silentAudio && !silentAudio.paused) silentAudio.pause();
+  }
+
+  // ── Visit counter (GitHub Gist) ───────────────────────────
+  const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
+  const GH_TOKEN   = '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';
+  const GIST_FILE = 'bichradio-counter.json';
+
+  async function gistRequest(method, body) {
+    return fetch(`https://api.github.com/gists/${GIST_ID}`, {
+      method,
+      headers: {
+        'Authorization': `Bearer ${GH_TOKEN}`,
+        'Accept': 'application/vnd.github+json',
+        ...(body ? { 'Content-Type': 'application/json' } : {})
+      },
+      ...(body ? { body: JSON.stringify(body) } : {})
+    });
+  }
+
+  async function incrementCounter() {
+    try {
+      const res      = await gistRequest('GET');
+      if (!res.ok) return;
+      const data     = await res.json();
+      const current  = JSON.parse(data.files[GIST_FILE].content);
+      const newCount = (current.count || 0) + 1;
+      await gistRequest('PATCH', {
+        files: { [GIST_FILE]: { content: JSON.stringify({ count: newCount }) } }
+      });
+      document.getElementById('counter-value').textContent = newCount.toLocaleString();
+    } catch(e) {}
+  }
+
+  incrementCounter();
+</script>
+</body>
+</html>
