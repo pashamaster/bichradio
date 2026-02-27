@@ -503,6 +503,23 @@
     document.getElementById('icon-pause').style.display = playing ? '' : 'none';
   }
 
+  const FADE_MS    = 300;
+  const FADE_STEPS = 3;
+
+  function fadeWidget(w, fromVol, toVol, ms, onDone) {
+    let step = 0;
+    const interval = ms / FADE_STEPS;
+    const timer = setInterval(() => {
+      step++;
+      const t    = step / FADE_STEPS;
+      const ease = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2;
+      const vol  = Math.round(fromVol + (toVol - fromVol) * ease);
+      w.setVolume(Math.max(0, Math.min(100, vol)));
+      if (step >= FADE_STEPS) { clearInterval(timer); if (onDone) onDone(); }
+    }, interval);
+    return timer;
+  }
+
   // ── Seek once per track into 23–43 min range ─────────────
   function doSeek(w) {
     if (didSeek) return;
@@ -585,10 +602,12 @@
         setTimeout(() => doSeek(ch.widget), 400);
         incrementCounter();
       }
+      // Fade in new channel (3 steps × 100ms = 300ms)
       if (switching) {
-        ch.widget.setVolume(userVolume);
-        switching = false;
-        document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
+        fadeWidget(ch.widget, 0, userVolume, FADE_MS, () => {
+          switching = false;
+          document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
+        });
       }
     });
 
@@ -636,8 +655,11 @@
       didSeek    = false;
       isPlaying  = false;
 
-      from.widget.setVolume(0);
-      from.widget.pause();
+      // Fade out old channel (3 steps × 100ms = 300ms)
+      fadeWidget(from.widget, userVolume, 0, FADE_MS, () => {
+        from.widget.pause();
+        from.widget.setVolume(0);
+      });
 
       to.widget.skip(to.shuffled[currentIdx]);
       reliablePlay(to.widget);
@@ -757,8 +779,8 @@
   }
 
   // ── Visit counter (GitHub Gist) ───────────────────────────
-  const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
-  const GH_TOKEN   = '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';
+const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
+  const GH_TOKEN   = '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';
   const GIST_FILE = 'bichradio-counter.json';
 
   async function gistRequest(method, body) {
