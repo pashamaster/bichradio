@@ -1,0 +1,12 @@
+name               = "bichradiodb"
+main               = "worker.js"
+compatibility_date = "2024-01-01"
+
+# KV namespace binding — create this first, then paste the ID below:
+#   wrangler kv namespace create COUNTER_KV
+# It will print:  id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# Paste that id here:
+
+[[kv_namespaces]]
+binding = "COUNTER_KV"
+id      = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"

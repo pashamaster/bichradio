@@ -893,36 +893,34 @@
     });
   }, 700);
 
-  // ── Visit counter (GitHub Gist) ──────────────────────────
-  // Increments every time the page loads
-  const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
-  const GH_TOKEN   = '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';
-  const GIST_FILE = 'bichradio-counter.json';
+  // ── Visit counter ─────────────────────────────────────────
+  // Counter calls a Cloudflare Worker proxy — no tokens in client code.
+  // Set this to your deployed Worker URL after running: wrangler deploy
+  const COUNTER_URL = 'https://bichradiodb.p-masterov.workers.dev';
 
-  async function gistRequest(method, body) {
-    return fetch(`https://api.github.com/gists/${GIST_ID}`, {
-      method,
-      headers: {
-        'Authorization': `Bearer ${GH_TOKEN}`,
-        'Accept': 'application/vnd.github+json',
-        ...(body ? { 'Content-Type': 'application/json' } : {})
-      },
-      ...(body ? { body: JSON.stringify(body) } : {})
-    });
+  function showCount(n) {
+    document.getElementById('counter-value').textContent = Number(n).toLocaleString();
   }
 
   async function incrementCounter() {
     try {
-      const res      = await gistRequest('GET');
-      if (!res.ok) return;
-      const data     = await res.json();
-      const current  = JSON.parse(data.files[GIST_FILE].content);
-      const newCount = (current.count || 0) + 1;
-      await gistRequest('PATCH', {
-        files: { [GIST_FILE]: { content: JSON.stringify({ count: newCount }) } }
-      });
-      document.getElementById('counter-value').textContent = newCount.toLocaleString();
-    } catch(e) {}
+      // POST /increment — Worker handles Gist read/write securely
+      const res  = await fetch(`${COUNTER_URL}/increment`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Worker responded ${res.status}`);
+      const data = await res.json();
+      showCount(data.count);
+      console.log('[bichradio] counter:', data.count);
+    } catch(e) {
+      console.warn('[bichradio] counter increment failed:', e.message);
+      // Fallback: try to at least show current count
+      try {
+        const res  = await fetch(`${COUNTER_URL}/count`);
+        const data = await res.json();
+        if (data.count != null) showCount(data.count);
+      } catch(e2) {
+        console.warn('[bichradio] counter read fallback failed:', e2.message);
+      }
+    }
   }
 
   incrementCounter();
