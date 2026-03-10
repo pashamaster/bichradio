@@ -616,9 +616,9 @@
   const FADE_MS    = 300;
   const FADE_STEPS = 3;
 
-  let seekDone    = false; // true once seek attempted for current track
-  let seekTried   = false; // true after first seek, used to detect short-track FINISH
-  let userSkipped = false; // true when skip came from user action (btn, media key, channel switch)
+  let seekDone     = false; // true once seek attempted for current track
+  let seekTried    = false; // true after first seek, used to detect short-track FINISH
+  let seekFromStart = false; // true when next track should start from beginning (natural finish)
 
   // ── Helpers ──────────────────────────────────────────────
   function active()   { return channels[activeId]; }
@@ -662,21 +662,15 @@
   }
 
   // ── Seek — blind, no getDuration ─────────────────────────
-  // Tries SEEK_PRIMARY (38 min) immediately. If the track is
-  // shorter, SoundCloud clamps to end and fires FINISH fast.
-  // The FINISH handler detects a quick finish and retries at
-  // SEEK_FALLBACK (25 min) before moving to the next track.
+  // seekFromStart=true  → play from beginning (natural track finish)
+  // seekFromStart=false → random 23–43 min (user skip / channel switch)
+  // If track is too short for random seek, FINISH fires fast and
+  // the handler retries at SEEK_FALLBACK before advancing.
   function doSeek(w) {
     if (seekDone) return;
     seekDone = true;
-    if (!userSkipped) {
-      // Natural finish — play from the very beginning
-      userSkipped = false;
-      return;
-    }
-    // User-triggered skip — seek to random point between 23–43 min
-    userSkipped = false;
-    seekTried   = true;
+    if (seekFromStart) return; // play from beginning, no seekTo needed
+    seekTried = true;
     const seekTo = SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN));
     w.seekTo(seekTo);
   }
@@ -696,10 +690,10 @@
   }
 
   // ── Play a track on the active channel ───────────────────
-  function playTrack(idx) {
-    seekDone = false; seekTried = false;
-    // userSkipped is NOT reset here — it was set by the caller
-    // and is read by doSeek below, then cleared
+  function playTrack(idx, fromStart = false) {
+    seekDone      = false;
+    seekTried     = false;
+    seekFromStart = fromStart;
     clearInterval(playRetry);
     const ch = active();
     ch.widget.skip(ch.shuffled[idx]);
@@ -782,17 +776,16 @@
         ch.widget.play();
         return;
       }
-      // Natural finish — next track plays from beginning (userSkipped stays false)
-      userSkipped = false;
+      // Natural finish — next track starts from beginning
       currentIdx = (currentIdx + 1) % ch.shuffled.length;
-      playTrack(currentIdx);
+      playTrack(currentIdx, true);
     });
 
     ch.widget.bind(SC.Widget.Events.ERROR, () => {
       if (ch.id !== activeId) return;
       isPlaying = false;
       setStatus('stream error — skipping…');
-      setTimeout(() => { userSkipped = true; currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); }, 800);
+      setTimeout(() => { currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); }, 800);
     });
   }
 
@@ -815,7 +808,6 @@
       activeId   = toId;
       currentIdx = 0;
       seekDone    = false; seekTried = false;
-      userSkipped = true;  // channel switch always seeks to random point
       isPlaying   = false;
 
       // Fade out old channel (3 steps × 100ms = 300ms)
@@ -1057,12 +1049,10 @@
       ch().widget.pause();
     });
     navigator.mediaSession.setActionHandler('nexttrack', () => {
-      userSkipped = true;
       currentIdx = (currentIdx + 1) % ch().shuffled.length;
       playTrack(currentIdx);
     });
     navigator.mediaSession.setActionHandler('previoustrack', () => {
-      userSkipped = true;
       currentIdx = (currentIdx - 1 + ch().shuffled.length) % ch().shuffled.length;
       playTrack(currentIdx);
     });
