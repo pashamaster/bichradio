@@ -474,10 +474,11 @@
   let userVolume = 80;
   let switching  = false;
   let playRetry  = null;
-  let didSeek    = false;
-
-  const SEEK_MIN = 23 * 60 * 1000;
-  const SEEK_MAX = 43 * 60 * 1000;
+  const SEEK_MIN      = 23 * 60 * 1000;
+  const SEEK_MAX      = 43 * 60 * 1000;
+  const SEEK_FALLBACK = 25 * 60 * 1000;
+  let seekDone = false;
+  let seekTried = false;
 
   function active()   { return channels[activeId]; }
 
@@ -522,15 +523,11 @@
 
   // ── Seek once per track into 23–43 min range ─────────────
   function doSeek(w) {
-    if (didSeek) return;
-    didSeek = true;
-    w.getDuration(d => {
-      if (!d || d < 60000) return;
-      const seekTo = d > SEEK_MAX
-        ? SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN))
-        : Math.floor(d * 0.4);
-      w.seekTo(seekTo);
-    });
+    if (seekDone) return;
+    seekDone  = true;
+    seekTried = true;
+    const seekTo = SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN));
+    w.seekTo(seekTo);
   }
 
   // ── Reliable play with retry ──────────────────────────────
@@ -549,7 +546,7 @@
 
   // ── Play a track ──────────────────────────────────────────
   function playTrack(idx) {
-    didSeek = false;
+    seekDone = false; seekTried = false;
     clearInterval(playRetry);
     const ch = active();
     ch.widget.skip(ch.shuffled[idx]);
@@ -622,6 +619,12 @@
     ch.widget.bind(SC.Widget.Events.FINISH, () => {
       if (ch.id !== activeId) return;
       isPlaying = false;
+      if (seekTried) {
+        seekTried = false;
+        ch.widget.seekTo(SEEK_FALLBACK);
+        ch.widget.play();
+        return;
+      }
       currentIdx = (currentIdx + 1) % ch.shuffled.length;
       playTrack(currentIdx);
     });
@@ -652,7 +655,7 @@
       to.widget.setVolume(0);
       activeId   = toId;
       currentIdx = 0;
-      didSeek    = false;
+      seekDone   = false; seekTried = false;
       isPlaying  = false;
 
       // Fade out old channel (3 steps × 100ms = 300ms)
@@ -745,9 +748,11 @@
   // ── Media Session (lock screen) ───────────────────────────
   const silentAudio = (function() {
     if (!('mediaSession' in navigator)) return null;
-    const SILENT = 'data:audio/mpeg;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA//////////////////////////////////////////////////////////////////8AAAA5TEVERAAAAB0ZvciBtb3JlIGluZm9ybWF0aW9uIGFib3V0IFRoaXMgZmlsZSwgdmlzaXQgdGhlIExhbWUgaG9tZXBhZ2Uu//uSxAACAABoBAAAACAADSAAAAETEFNRTMuOTlyBYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
     const el = document.createElement('audio');
-    el.src = SILENT; el.loop = true; el.volume = 0.001;
+    el.src = 'https://bichradio.com/silent.mp3';
+    el.loop = true; el.volume = 0.001;
+    el.setAttribute('playsinline', '');
+    el.setAttribute('webkit-playsinline', '');
     document.body.appendChild(el);
     const ch = () => channels[activeId];
     navigator.mediaSession.setActionHandler('play',         () => { ch().widget.setVolume(userVolume); reliablePlay(ch().widget); el.play().catch(() => {}); });
@@ -778,35 +783,28 @@
     if (silentAudio && !silentAudio.paused) silentAudio.pause();
   }
 
-  // ── Visit counter (GitHub Gist) ───────────────────────────
-const GIST_ID    = '81efc77d0223e4f68efb043a0527411b';
-  const GH_TOKEN   = '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';
-  const GIST_FILE = 'bichradio-counter.json';
+  // ── Visit counter ─────────────────────────────────────────
+  const COUNTER_URL = 'https://bichradiodb.p-masterov.workers.dev';
 
-  async function gistRequest(method, body) {
-    return fetch(`https://api.github.com/gists/${GIST_ID}`, {
-      method,
-      headers: {
-        'Authorization': `Bearer ${GH_TOKEN}`,
-        'Accept': 'application/vnd.github+json',
-        ...(body ? { 'Content-Type': 'application/json' } : {})
-      },
-      ...(body ? { body: JSON.stringify(body) } : {})
-    });
+  function showCount(n) {
+    document.getElementById('counter-value').textContent = Number(n).toLocaleString();
   }
 
   async function incrementCounter() {
     try {
-      const res      = await gistRequest('GET');
-      if (!res.ok) return;
-      const data     = await res.json();
-      const current  = JSON.parse(data.files[GIST_FILE].content);
-      const newCount = (current.count || 0) + 1;
-      await gistRequest('PATCH', {
-        files: { [GIST_FILE]: { content: JSON.stringify({ count: newCount }) } }
-      });
-      document.getElementById('counter-value').textContent = newCount.toLocaleString();
-    } catch(e) {}
+      const res  = await fetch(`${COUNTER_URL}/increment`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Worker responded ${res.status}`);
+      const data = await res.json();
+      showCount(data.count);
+      console.log('[bichradio] counter:', data.count);
+    } catch(e) {
+      console.warn('[bichradio] counter increment failed:', e.message);
+      try {
+        const res  = await fetch(`${COUNTER_URL}/count`);
+        const data = await res.json();
+        if (data.count != null) showCount(data.count);
+      } catch(e2) {}
+    }
   }
 
   incrementCounter();
