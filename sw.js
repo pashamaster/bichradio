@@ -3,11 +3,11 @@
 //   SHELL_CACHE  — app shell (index.html, manifest, fonts) — cache-first
 //   AUDIO_CACHE  — SoundCloud audio streams — 3MB rolling buffer
 
-const SHELL_CACHE = 'bichradio-shell-v2';
+const SHELL_CACHE = 'bichradio-shell-v3';
 const AUDIO_CACHE = 'bichradio-audio-v2';
 const AUDIO_MAX_BYTES = 3 * 1024 * 1024; // 3 MB hard cap
 
-const SHELL_ASSETS = ['/', '/index.html', '/manifest.json'];
+const SHELL_ASSETS = ['/', '/index.html', '/manifest.json', '/silent.mp3'];
 // version.json is intentionally excluded — always fetched fresh
 
 // ── Install: pre-cache shell assets ──────────────────────

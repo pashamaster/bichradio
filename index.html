@@ -610,12 +610,14 @@
   let userVolume = 80;
   let switching  = false;
   let playRetry  = null;
-  let didSeek    = false;
-
-  const SEEK_MIN   = 23 * 60 * 1000;
-  const SEEK_MAX   = 43 * 60 * 1000;
+  const SEEK_MIN      = 23 * 60 * 1000; // random range start
+  const SEEK_MAX      = 43 * 60 * 1000; // random range end
+  const SEEK_FALLBACK = 25 * 60 * 1000; // fallback if track too short
   const FADE_MS    = 300;
   const FADE_STEPS = 3;
+
+  let seekDone  = false;  // true once seek attempted for current track
+  let seekTried = false;  // true after first seek, used to detect short-track FINISH
 
   // ── Helpers ──────────────────────────────────────────────
   function active()   { return channels[activeId]; }
@@ -658,17 +660,18 @@
     return timer;
   }
 
-  // ── Seek once per track into 23–43 min range ─────────────
+  // ── Seek — blind, no getDuration ─────────────────────────
+  // Tries SEEK_PRIMARY (38 min) immediately. If the track is
+  // shorter, SoundCloud clamps to end and fires FINISH fast.
+  // The FINISH handler detects a quick finish and retries at
+  // SEEK_FALLBACK (25 min) before moving to the next track.
   function doSeek(w) {
-    if (didSeek) return;
-    didSeek = true;
-    w.getDuration(d => {
-      if (!d || d < 60000) return;
-      const seekTo = d > SEEK_MAX
-        ? SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN))
-        : Math.floor(d * 0.4);
-      w.seekTo(seekTo);
-    });
+    if (seekDone) return;
+    seekDone  = true;
+    seekTried = true;
+    // Random point between 23–43 min on every play
+    const seekTo = SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN));
+    w.seekTo(seekTo);
   }
 
   // ── Reliable play with retry ─────────────────────────────
@@ -687,7 +690,7 @@
 
   // ── Play a track on the active channel ───────────────────
   function playTrack(idx) {
-    didSeek = false;
+    seekDone = false; seekTried = false;
     clearInterval(playRetry);
     const ch = active();
     ch.widget.skip(ch.shuffled[idx]);
@@ -762,6 +765,14 @@
     ch.widget.bind(SC.Widget.Events.FINISH, () => {
       if (ch.id !== activeId) return;
       isPlaying = false;
+      // If we just seeked to SEEK_PRIMARY and FINISH fired fast,
+      // the track is shorter — retry at SEEK_FALLBACK before skipping
+      if (seekTried) {
+        seekTried = false;
+        ch.widget.seekTo(SEEK_FALLBACK);
+        ch.widget.play();
+        return;
+      }
       currentIdx = (currentIdx + 1) % ch.shuffled.length;
       playTrack(currentIdx);
     });
@@ -792,7 +803,7 @@
       to.widget.setVolume(0);
       activeId   = toId;
       currentIdx = 0;
-      didSeek    = false;
+      seekDone   = false; seekTried = false;
       isPlaying  = false;
 
       // Fade out old channel (3 steps × 100ms = 300ms)
@@ -1003,14 +1014,17 @@
   const silentAudio = (function() {
     if (!('mediaSession' in navigator)) return null;
 
-    // 1-second silent MP3 as a data URI (44 bytes, valid file)
-    const SILENT = 'data:audio/mpeg;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA//////////////////////////////////////////////////////////////////8AAAA5TEVER' +
-      'AAAAB0ZvciBtb3JlIGluZm9ybWF0aW9uIGFib3V0IFRoaXMgZmlsZSwgdmlzaXQgdGhlIExhbWUgaG9tZXBhZ2Uu//uSxAACAABoBAAAACAADSAAAAETEFNRTMuOTlyBYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
-
+    // Hosted silent MP3 — a real file served from our domain.
+    // This is required because iOS/Android won't transfer the media
+    // session ownership from a cross-origin iframe (SoundCloud) to
+    // this page unless we have a native <audio> element playing a
+    // real file from our own origin.
     const el = document.createElement('audio');
-    el.src    = SILENT;
+    el.src    = '/silent.mp3';
     el.loop   = true;
-    el.volume = 0.001; // near-silent but non-zero — browser needs actual audio output
+    el.volume = 0.001; // inaudible but non-zero — browser requires actual output
+    el.setAttribute('playsinline', '');
+    el.setAttribute('webkit-playsinline', '');
     document.body.appendChild(el);
 
     // Register action handlers once
