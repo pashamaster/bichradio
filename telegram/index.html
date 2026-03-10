@@ -477,8 +477,9 @@
   const SEEK_MIN      = 23 * 60 * 1000;
   const SEEK_MAX      = 43 * 60 * 1000;
   const SEEK_FALLBACK = 25 * 60 * 1000;
-  let seekDone = false;
-  let seekTried = false;
+  let seekDone    = false;
+  let seekTried   = false;
+  let userSkipped = false;
 
   function active()   { return channels[activeId]; }
 
@@ -524,8 +525,13 @@
   // ── Seek once per track into 23–43 min range ─────────────
   function doSeek(w) {
     if (seekDone) return;
-    seekDone  = true;
-    seekTried = true;
+    seekDone = true;
+    if (!userSkipped) {
+      userSkipped = false;
+      return; // natural finish — play from beginning
+    }
+    userSkipped = false;
+    seekTried   = true;
     const seekTo = SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN));
     w.seekTo(seekTo);
   }
@@ -625,6 +631,7 @@
         ch.widget.play();
         return;
       }
+      userSkipped = false;
       currentIdx = (currentIdx + 1) % ch.shuffled.length;
       playTrack(currentIdx);
     });
@@ -634,7 +641,7 @@
       isPlaying = false;
       haptic.error();
       setStatus('stream error — skipping…');
-      setTimeout(() => { currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); }, 800);
+      setTimeout(() => { userSkipped = true; currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); }, 800);
     });
   }
 
@@ -655,8 +662,9 @@
       to.widget.setVolume(0);
       activeId   = toId;
       currentIdx = 0;
-      seekDone   = false; seekTried = false;
-      isPlaying  = false;
+      seekDone    = false; seekTried = false;
+      userSkipped = true;
+      isPlaying   = false;
 
       // Fade out old channel (3 steps × 100ms = 300ms)
       fadeWidget(from.widget, userVolume, 0, FADE_MS, () => {
@@ -732,6 +740,7 @@
   document.getElementById('btn-next').addEventListener('click', () => {
     if (switching) return;
     haptic.light();
+    userSkipped = true;
     const ch = active();
     currentIdx = (currentIdx + 1) % ch.shuffled.length;
     playTrack(currentIdx);
@@ -740,6 +749,7 @@
   document.getElementById('btn-prev').addEventListener('click', () => {
     if (switching) return;
     haptic.light();
+    userSkipped = true;
     const ch = active();
     currentIdx = (currentIdx - 1 + ch.shuffled.length) % ch.shuffled.length;
     playTrack(currentIdx);
@@ -748,23 +758,46 @@
   // ── Media Session (lock screen) ───────────────────────────
   const silentAudio = (function() {
     if (!('mediaSession' in navigator)) return null;
-    const el = document.createElement('audio');
-    el.src = 'https://bichradio.com/silent.mp3';
-    el.loop = true; el.volume = 0.001;
-    el.setAttribute('playsinline', '');
-    el.setAttribute('webkit-playsinline', '');
-    document.body.appendChild(el);
+
+    const make = (src) => {
+      const el = document.createElement('audio');
+      el.src    = src;
+      el.loop   = true;
+      el.volume = 0.001;
+      el.setAttribute('playsinline', '');
+      el.setAttribute('webkit-playsinline', '');
+      document.body.appendChild(el);
+      return el;
+    };
+
+    const elIdle   = make('https://bichradio.com/silent-bichradio.mp3');
+    const elActive = make('https://bichradio.com/silent.mp3');
+
     const ch = () => channels[activeId];
-    navigator.mediaSession.setActionHandler('play',         () => { ch().widget.setVolume(userVolume); reliablePlay(ch().widget); el.play().catch(() => {}); });
-    navigator.mediaSession.setActionHandler('pause',        () => { ch().widget.pause(); el.pause(); });
-    navigator.mediaSession.setActionHandler('nexttrack',    () => { currentIdx = (currentIdx + 1) % ch().shuffled.length; playTrack(currentIdx); });
-    navigator.mediaSession.setActionHandler('previoustrack',() => { currentIdx = (currentIdx - 1 + ch().shuffled.length) % ch().shuffled.length; playTrack(currentIdx); });
-    return el;
+    navigator.mediaSession.setActionHandler('play', () => { ch().widget.setVolume(userVolume); reliablePlay(ch().widget); });
+    navigator.mediaSession.setActionHandler('pause', () => { ch().widget.pause(); });
+    navigator.mediaSession.setActionHandler('nexttrack', () => { userSkipped = true; currentIdx = (currentIdx + 1) % ch().shuffled.length; playTrack(currentIdx); });
+    navigator.mediaSession.setActionHandler('previoustrack', () => { userSkipped = true; currentIdx = (currentIdx - 1 + ch().shuffled.length) % ch().shuffled.length; playTrack(currentIdx); });
+
+    document.addEventListener('click', function claimSession() {
+      elIdle.play().catch(() => {});
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'bichradio', artist: 'bichradio', album: 'on air',
+        artwork: [
+          { src: 'https://bichradio.com/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'https://bichradio.com/icon-512.png', sizes: '512x512', type: 'image/png' }
+        ]
+      });
+      document.removeEventListener('click', claimSession);
+    }, { once: true });
+
+    return { idle: elIdle, active: elActive };
   })();
 
   function updateMediaSession(title) {
-    if (!('mediaSession' in navigator)) return;
-    if (silentAudio?.paused) silentAudio.play().catch(() => {});
+    if (!('mediaSession' in navigator) || !silentAudio) return;
+    silentAudio.idle.pause();
+    silentAudio.active.play().catch(() => {});
     navigator.mediaSession.metadata = new MediaMetadata({
       title:  title || 'bichradio',
       artist: 'bichradio',
@@ -778,10 +811,19 @@
   }
 
   function pauseMediaSession() {
-    if (!('mediaSession' in navigator)) return;
+    if (!('mediaSession' in navigator) || !silentAudio) return;
+    silentAudio.active.pause();
+    silentAudio.idle.play().catch(() => {});
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: 'bichradio', artist: 'bichradio', album: 'on air',
+      artwork: [
+        { src: 'https://bichradio.com/icon-192.png', sizes: '192x192', type: 'image/png' },
+        { src: 'https://bichradio.com/icon-512.png', sizes: '512x512', type: 'image/png' }
+      ]
+    });
     navigator.mediaSession.playbackState = 'paused';
-    if (silentAudio && !silentAudio.paused) silentAudio.pause();
   }
+
 
   // ── Visit counter ─────────────────────────────────────────
   const COUNTER_URL = 'https://bichradiodb.p-masterov.workers.dev';
