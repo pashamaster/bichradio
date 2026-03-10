@@ -7,7 +7,7 @@ const SHELL_CACHE = 'bichradio-shell-v3';
 const AUDIO_CACHE = 'bichradio-audio-v2';
 const AUDIO_MAX_BYTES = 3 * 1024 * 1024; // 3 MB hard cap
 
-const SHELL_ASSETS = ['/', '/index.html', '/manifest.json', '/silent.mp3'];
+const SHELL_ASSETS = ['/', '/index.html', '/manifest.json', '/silent.mp3', '/silent-bichradio.mp3'];
 // version.json is intentionally excluded — always fetched fresh
 
 // ── Install: pre-cache shell assets ──────────────────────

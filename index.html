@@ -616,8 +616,9 @@
   const FADE_MS    = 300;
   const FADE_STEPS = 3;
 
-  let seekDone  = false;  // true once seek attempted for current track
-  let seekTried = false;  // true after first seek, used to detect short-track FINISH
+  let seekDone    = false; // true once seek attempted for current track
+  let seekTried   = false; // true after first seek, used to detect short-track FINISH
+  let userSkipped = false; // true when skip came from user action (btn, media key, channel switch)
 
   // ── Helpers ──────────────────────────────────────────────
   function active()   { return channels[activeId]; }
@@ -667,9 +668,15 @@
   // SEEK_FALLBACK (25 min) before moving to the next track.
   function doSeek(w) {
     if (seekDone) return;
-    seekDone  = true;
-    seekTried = true;
-    // Random point between 23–43 min on every play
+    seekDone = true;
+    if (!userSkipped) {
+      // Natural finish — play from the very beginning
+      userSkipped = false;
+      return;
+    }
+    // User-triggered skip — seek to random point between 23–43 min
+    userSkipped = false;
+    seekTried   = true;
     const seekTo = SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN));
     w.seekTo(seekTo);
   }
@@ -691,6 +698,8 @@
   // ── Play a track on the active channel ───────────────────
   function playTrack(idx) {
     seekDone = false; seekTried = false;
+    // userSkipped is NOT reset here — it was set by the caller
+    // and is read by doSeek below, then cleared
     clearInterval(playRetry);
     const ch = active();
     ch.widget.skip(ch.shuffled[idx]);
@@ -765,14 +774,16 @@
     ch.widget.bind(SC.Widget.Events.FINISH, () => {
       if (ch.id !== activeId) return;
       isPlaying = false;
-      // If we just seeked to SEEK_PRIMARY and FINISH fired fast,
-      // the track is shorter — retry at SEEK_FALLBACK before skipping
+      // Short-track fallback: if FINISH fired right after our seek,
+      // the track was too short — retry at SEEK_FALLBACK
       if (seekTried) {
         seekTried = false;
         ch.widget.seekTo(SEEK_FALLBACK);
         ch.widget.play();
         return;
       }
+      // Natural finish — next track plays from beginning (userSkipped stays false)
+      userSkipped = false;
       currentIdx = (currentIdx + 1) % ch.shuffled.length;
       playTrack(currentIdx);
     });
@@ -781,7 +792,7 @@
       if (ch.id !== activeId) return;
       isPlaying = false;
       setStatus('stream error — skipping…');
-      setTimeout(() => { currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); }, 800);
+      setTimeout(() => { userSkipped = true; currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); }, 800);
     });
   }
 
@@ -803,8 +814,9 @@
       to.widget.setVolume(0);
       activeId   = toId;
       currentIdx = 0;
-      seekDone   = false; seekTried = false;
-      isPlaying  = false;
+      seekDone    = false; seekTried = false;
+      userSkipped = true;  // channel switch always seeks to random point
+      isPlaying   = false;
 
       // Fade out old channel (3 steps × 100ms = 300ms)
       fadeWidget(from.widget, userVolume, 0, FADE_MS, () => {
@@ -1011,55 +1023,73 @@
   // element. Since our audio lives in a cross-origin SC iframe, we play a
   // silent looping tone from THIS page to claim the session, then set our
   // metadata on top of it.
+  // ── Media Session ────────────────────────────────────────
+  // Two silent MP3s served from our own domain:
+  //   silent-bichradio.mp3 — ID3 title = "bichradio", plays when
+  //                          idle/paused so lock screen always shows
+  //                          "bichradio" instead of "SoundCloud Widget"
+  //   silent.mp3           — plain silent, plays while music is active
+  //                          so our MediaMetadata track title shows on top
   const silentAudio = (function() {
     if (!('mediaSession' in navigator)) return null;
 
-    // Hosted silent MP3 — a real file served from our domain.
-    // This is required because iOS/Android won't transfer the media
-    // session ownership from a cross-origin iframe (SoundCloud) to
-    // this page unless we have a native <audio> element playing a
-    // real file from our own origin.
-    const el = document.createElement('audio');
-    el.src    = '/silent.mp3';
-    el.loop   = true;
-    el.volume = 0.001; // inaudible but non-zero — browser requires actual output
-    el.setAttribute('playsinline', '');
-    el.setAttribute('webkit-playsinline', '');
-    document.body.appendChild(el);
+    const make = (src) => {
+      const el = document.createElement('audio');
+      el.src    = src;
+      el.loop   = true;
+      el.volume = 0.001;
+      el.setAttribute('playsinline', '');
+      el.setAttribute('webkit-playsinline', '');
+      document.body.appendChild(el);
+      return el;
+    };
 
-    // Register action handlers once
+    const elIdle   = make('/silent-bichradio.mp3'); // shown on lock screen when idle
+    const elActive = make('/silent.mp3');            // plays while music is active
+
     const ch = () => channels[activeId];
 
     navigator.mediaSession.setActionHandler('play', () => {
-      const c = ch();
-      c.widget.setVolume(userVolume);
-      reliablePlay(c.widget);
-      el.play().catch(() => {});
+      ch().widget.setVolume(userVolume);
+      reliablePlay(ch().widget);
     });
     navigator.mediaSession.setActionHandler('pause', () => {
       ch().widget.pause();
-      el.pause();
     });
     navigator.mediaSession.setActionHandler('nexttrack', () => {
+      userSkipped = true;
       currentIdx = (currentIdx + 1) % ch().shuffled.length;
       playTrack(currentIdx);
     });
     navigator.mediaSession.setActionHandler('previoustrack', () => {
+      userSkipped = true;
       currentIdx = (currentIdx - 1 + ch().shuffled.length) % ch().shuffled.length;
       playTrack(currentIdx);
     });
 
-    return el;
+    // Claim the session on first user tap — start idle audio
+    // so lock screen shows "bichradio" from the very first interaction
+    document.addEventListener('click', function claimSession() {
+      elIdle.play().catch(() => {});
+      // Set initial metadata immediately
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'bichradio', artist: 'bichradio', album: 'on air',
+        artwork: [
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
+        ]
+      });
+      document.removeEventListener('click', claimSession);
+    }, { once: true });
+
+    return { idle: elIdle, active: elActive };
   })();
 
   function updateMediaSession(title) {
-    if (!('mediaSession' in navigator)) return;
-
-    // Start silent audio to claim the session (needs user gesture, already happened)
-    if (silentAudio && silentAudio.paused) {
-      silentAudio.play().catch(() => {});
-    }
-
+    if (!('mediaSession' in navigator) || !silentAudio) return;
+    // Swap: pause idle, start active — track title shows on lock screen
+    silentAudio.idle.pause();
+    silentAudio.active.play().catch(() => {});
     navigator.mediaSession.metadata = new MediaMetadata({
       title:  title || 'bichradio',
       artist: 'bichradio',
@@ -1073,10 +1103,20 @@
   }
 
   function pauseMediaSession() {
-    if (!('mediaSession' in navigator)) return;
+    if (!('mediaSession' in navigator) || !silentAudio) return;
+    // Swap: pause active, resume idle — lock screen shows "bichradio" again
+    silentAudio.active.pause();
+    silentAudio.idle.play().catch(() => {});
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: 'bichradio', artist: 'bichradio', album: 'on air',
+      artwork: [
+        { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+        { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
+      ]
+    });
     navigator.mediaSession.playbackState = 'paused';
-    if (silentAudio && !silentAudio.paused) silentAudio.pause();
   }
+
 
   // ── Service worker ───────────────────────────────────────
   if ('serviceWorker' in navigator) {
