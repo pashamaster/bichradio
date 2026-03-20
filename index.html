@@ -661,15 +661,11 @@
     return timer;
   }
 
-  // ── Seek — blind, no getDuration ─────────────────────────
-  // seekFromStart=true  → play from beginning (natural track finish)
-  // seekFromStart=false → random 23–43 min (user skip / channel switch)
-  // If track is too short for random seek, FINISH fires fast and
-  // the handler retries at SEEK_FALLBACK before advancing.
+  // ── Seek — only called for user-triggered skips ──────────
+  // Natural finish path bypasses this entirely (seekTo(0) in playTrack)
   function doSeek(w) {
-    if (seekDone) return;
-    seekDone = true;
-    if (seekFromStart) return; // play from beginning, no seekTo needed
+    if (seekDone || seekFromStart) return;
+    seekDone  = true;
     seekTried = true;
     const seekTo = SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN));
     w.seekTo(seekTo);
@@ -698,7 +694,16 @@
     const ch = active();
     ch.widget.skip(ch.shuffled[idx]);
     ch.widget.setVolume(userVolume);
-    reliablePlay(ch.widget);
+    if (fromStart) {
+      // Natural finish — seek to position 0 explicitly so there's
+      // no ambiguity about where playback starts, then play
+      setTimeout(() => {
+        ch.widget.seekTo(0);
+        ch.widget.play();
+      }, 300);
+    } else {
+      reliablePlay(ch.widget);
+    }
   }
 
   // ── Bind events for one channel widget ───────────────────
@@ -1108,9 +1113,68 @@
   }
 
 
-  // ── Service worker ───────────────────────────────────────
+  // ── Service worker + Push notifications ──────────────────
+  const VAPID_PUBLIC_KEY = 'BNoxPSlXS8Zors0VfNKZeW13VRKpHPE1zV1b9N7bJiw63dDVLA9QVccfi9oUAMyl7cbdo1mKtzv78iQPxRUK0Qk';
+
+  function urlBase64ToUint8(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw     = atob(base64);
+    return Uint8Array.from(raw, c => c.charCodeAt(0));
+  }
+
+  async function subscribeToPush(swReg) {
+    try {
+      // Check if already subscribed
+      let sub = await swReg.pushManager.getSubscription();
+
+      if (!sub) {
+        sub = await swReg.pushManager.subscribe({
+          userVisibleOnly:      true,
+          applicationServerKey: urlBase64ToUint8(VAPID_PUBLIC_KEY)
+        });
+      }
+
+      // Send subscription to Worker
+      await fetch(`${COUNTER_URL}/push/subscribe`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(sub.toJSON())
+      });
+
+      console.log('[bichradio] push: subscribed');
+    } catch(e) {
+      console.warn('[bichradio] push subscribe failed:', e.message);
+    }
+  }
+
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch(console.warn);
+    navigator.serviceWorker.register('/sw.js')
+      .then(async reg => {
+        // Only ask for push permission on mobile PWA installs
+        // to avoid annoying desktop users — ask after first play
+        const isMobilePWA = (
+          window.matchMedia('(display-mode: standalone)').matches ||
+          navigator.standalone
+        ) && /iphone|ipad|ipod|android/i.test(navigator.userAgent);
+
+        if (!isMobilePWA) return;
+        if (!('PushManager' in window)) return;
+
+        // Wait for user to tap play before asking permission
+        // (browsers require a user gesture for notification permission on some platforms)
+        document.getElementById('btn-play').addEventListener('click', async function askOnce() {
+          document.getElementById('btn-play').removeEventListener('click', askOnce);
+          // Small delay so the click feels intentional, not jarring
+          setTimeout(async () => {
+            const permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+              await subscribeToPush(reg);
+            }
+          }, 3000);
+        }, { once: true });
+      })
+      .catch(console.warn);
   }
 </script>
 </body>
