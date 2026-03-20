@@ -477,9 +477,9 @@
   const SEEK_MIN      = 23 * 60 * 1000;
   const SEEK_MAX      = 43 * 60 * 1000;
   const SEEK_FALLBACK = 25 * 60 * 1000;
-  let seekDone    = false;
-  let seekTried   = false;
-  let userSkipped = false;
+  let seekDone     = false;
+  let seekTried    = false;
+  let seekFromStart = false;
 
   function active()   { return channels[activeId]; }
 
@@ -524,14 +524,9 @@
 
   // ── Seek once per track into 23–43 min range ─────────────
   function doSeek(w) {
-    if (seekDone) return;
-    seekDone = true;
-    if (!userSkipped) {
-      userSkipped = false;
-      return; // natural finish — play from beginning
-    }
-    userSkipped = false;
-    seekTried   = true;
+    if (seekDone || seekFromStart) return;
+    seekDone  = true;
+    seekTried = true;
     const seekTo = SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN));
     w.seekTo(seekTo);
   }
@@ -551,13 +546,22 @@
   }
 
   // ── Play a track ──────────────────────────────────────────
-  function playTrack(idx) {
-    seekDone = false; seekTried = false;
+  function playTrack(idx, fromStart = false) {
+    seekDone      = false;
+    seekTried     = false;
+    seekFromStart = fromStart;
     clearInterval(playRetry);
     const ch = active();
     ch.widget.skip(ch.shuffled[idx]);
     ch.widget.setVolume(userVolume);
-    reliablePlay(ch.widget);
+    if (fromStart) {
+      setTimeout(() => {
+        ch.widget.seekTo(0);
+        ch.widget.play();
+      }, 300);
+    } else {
+      reliablePlay(ch.widget);
+    }
   }
 
   // ── Bind events for one channel ───────────────────────────
@@ -631,9 +635,8 @@
         ch.widget.play();
         return;
       }
-      userSkipped = false;
       currentIdx = (currentIdx + 1) % ch.shuffled.length;
-      playTrack(currentIdx);
+      playTrack(currentIdx, true);
     });
 
     ch.widget.bind(SC.Widget.Events.ERROR, () => {
@@ -641,7 +644,7 @@
       isPlaying = false;
       haptic.error();
       setStatus('stream error — skipping…');
-      setTimeout(() => { userSkipped = true; currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); }, 800);
+      setTimeout(() => { currentIdx = (currentIdx + 1) % ch.shuffled.length; playTrack(currentIdx); }, 800);
     });
   }
 
@@ -663,7 +666,6 @@
       activeId   = toId;
       currentIdx = 0;
       seekDone    = false; seekTried = false;
-      userSkipped = true;
       isPlaying   = false;
 
       // Fade out old channel (3 steps × 100ms = 300ms)
@@ -740,7 +742,6 @@
   document.getElementById('btn-next').addEventListener('click', () => {
     if (switching) return;
     haptic.light();
-    userSkipped = true;
     const ch = active();
     currentIdx = (currentIdx + 1) % ch.shuffled.length;
     playTrack(currentIdx);
@@ -749,7 +750,6 @@
   document.getElementById('btn-prev').addEventListener('click', () => {
     if (switching) return;
     haptic.light();
-    userSkipped = true;
     const ch = active();
     currentIdx = (currentIdx - 1 + ch.shuffled.length) % ch.shuffled.length;
     playTrack(currentIdx);
@@ -776,8 +776,8 @@
     const ch = () => channels[activeId];
     navigator.mediaSession.setActionHandler('play', () => { ch().widget.setVolume(userVolume); reliablePlay(ch().widget); });
     navigator.mediaSession.setActionHandler('pause', () => { ch().widget.pause(); });
-    navigator.mediaSession.setActionHandler('nexttrack', () => { userSkipped = true; currentIdx = (currentIdx + 1) % ch().shuffled.length; playTrack(currentIdx); });
-    navigator.mediaSession.setActionHandler('previoustrack', () => { userSkipped = true; currentIdx = (currentIdx - 1 + ch().shuffled.length) % ch().shuffled.length; playTrack(currentIdx); });
+    navigator.mediaSession.setActionHandler('nexttrack', () => { currentIdx = (currentIdx + 1) % ch().shuffled.length; playTrack(currentIdx); });
+    navigator.mediaSession.setActionHandler('previoustrack', () => { currentIdx = (currentIdx - 1 + ch().shuffled.length) % ch().shuffled.length; playTrack(currentIdx); });
 
     document.addEventListener('click', function claimSession() {
       elIdle.play().catch(() => {});
