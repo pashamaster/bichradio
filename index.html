@@ -450,6 +450,13 @@
   allow="autoplay">
 </iframe>
 
+<!-- Mixcloud fallback — hidden until SC is confirmed blocked -->
+<iframe id="mc-widget"
+  src="https://www.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&autoplay=0&feed=%2Fpashakaef%2Fplaylists%2Fclass%2F"
+  allow="autoplay"
+  style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;bottom:0;left:0;">
+</iframe>
+
 <script src="https://w.soundcloud.com/player/api.js"></script>
 <script>
   // ── Version check — auto-reload if stale ─────────────────
@@ -479,119 +486,113 @@
     viz.appendChild(b);
   }
 
-  // ── SoundCloud availability — 3-level check ──────────────
-  // Level 1: IP geolocation (known blocked regions)
-  // Level 2: Can we actually fetch the SC widget JS?
-  // Level 3: Did the class widget fire READY within timeout?
-  // All three must agree before switching to Mixcloud fallback.
+  // ── SC availability detection ─────────────────────────────
+  // Two signals: geo check + SC widget READY timeout.
+  // If either confirms blocked → switch to Mixcloud mode.
+  const BLOCKED_COUNTRIES = ['RU', 'BY', 'KP', 'IR', 'CU', 'SY'];
+  let   mcMode            = false; // true = Mixcloud fallback active
+  let   mcWidget          = null;  // Mixcloud Widget API instance
+  let   mcPlaying         = false;
+  let   scReadyTimer      = null;  // fires if SC class widget never fires READY
 
-  const BLOCKED_COUNTRIES  = ['RU', 'BY', 'KP', 'IR', 'CU', 'SY'];
-  const MIXCLOUD_CLASS_URL = 'https://www.mixcloud.com/pashakaef/playlists/class/';
-  let   scBlocked          = false; // set true only after all 3 levels confirm
-
-  // Score system — need 2+ signals to confirm blocked
-  let blockScore = 0;
-
-  async function checkLevel1_Geo() {
+  // Geo check — fast pre-signal
+  async function checkGeo() {
     try {
-      // Use two independent geo APIs for cross-check
       const res = await Promise.race([
         fetch('https://ipapi.co/json/', { cache: 'no-store' }),
-        new Promise((_, rej) => setTimeout(() => rej('timeout'), 4000))
+        new Promise((_, rej) => setTimeout(() => rej(), 4000))
       ]);
       if (!res.ok) return;
       const data = await res.json();
       if (BLOCKED_COUNTRIES.includes(data.country_code)) {
-        blockScore++;
-        console.log('[bichradio] Level 1: geo blocked —', data.country_code);
+        console.log('[bichradio] geo blocked —', data.country_code);
+        activateMixcloud();
       }
-    } catch(e) {
-      // Geo lookup failed — don't penalise, just skip
+    } catch(e) {}
+  }
+
+  // Called from bindChannel when class READY times out
+  function onScReadyTimeout() {
+    if (!mcMode) {
+      console.log('[bichradio] SC READY timeout — activating Mixcloud');
+      activateMixcloud();
     }
   }
 
-  async function checkLevel2_Network() {
-    try {
-      // Try fetching a tiny known SC resource with short timeout
-      // If it loads → SC is reachable. If it fails → likely blocked.
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 5000);
-      const res = await fetch('https://w.soundcloud.com/player/api.js', {
-        method: 'HEAD',
-        cache:  'no-store',
-        signal: ctrl.signal
+  // ── Mixcloud mode ─────────────────────────────────────────
+  function activateMixcloud() {
+    if (mcMode) return;
+    mcMode = true;
+
+    // Pause SC widgets
+    try { channels.sexy.widget?.pause(); } catch(e) {}
+    try { channels.class.widget?.pause(); } catch(e) {}
+
+    // Make MC iframe real and visible (it was hidden/tiny)
+    const mcIframe = document.getElementById('mc-widget');
+    mcIframe.style.cssText = [
+      'position:absolute', 'width:1px', 'height:1px',
+      'opacity:0', 'pointer-events:none', 'bottom:0', 'left:0'
+    ].join(';');
+
+    // Load Mixcloud Widget API
+    const script   = document.createElement('script');
+    script.src     = 'https://widget.mixcloud.com/media/js/widgetApi.js';
+    script.onload  = () => {
+      mcWidget = window.Mixcloud.PlayerWidget(mcIframe);
+      mcWidget.ready.then(() => {
+        console.log('[bichradio] Mixcloud widget ready');
+
+        mcWidget.events.play.on(() => {
+          mcPlaying = true;
+          viz.classList.remove('paused');
+          setPlayIcon(true);
+          setTitle('class · mixcloud');
+          setStatus('');
+          updateMediaSession('class · mixcloud');
+        });
+
+        mcWidget.events.pause.on(() => {
+          mcPlaying = false;
+          viz.classList.add('paused');
+          setPlayIcon(false);
+          pauseMediaSession();
+        });
+
+        mcWidget.events.ended.on(() => {
+          mcPlaying = false;
+          viz.classList.add('paused');
+          setPlayIcon(false);
+        });
+
+        mcWidget.events.error.on(() => {
+          setStatus('stream error');
+          haptic?.error();
+        });
       });
-      clearTimeout(timer);
-      if (!res.ok) {
-        blockScore++;
-        console.log('[bichradio] Level 2: SC network unreachable — status', res.status);
-      }
-    } catch(e) {
-      // Fetch threw (aborted, network error) — SC not reachable
-      blockScore++;
-      console.log('[bichradio] Level 2: SC network fetch failed —', e.message || e);
-    }
+    };
+    document.body.appendChild(script);
+
+    // Update UI — disable all channel buttons, show status
+    document.querySelectorAll('.pl-btn').forEach(btn => {
+      btn.disabled = true;
+      btn.title    = 'channel switching unavailable in your region';
+    });
+    // Keep class button visually active since that's what plays
+    document.getElementById('btn-class')?.classList.add('active');
+    document.getElementById('btn-sexy')?.classList.remove('active');
+
+    setStatus('SoundCloud unavailable — playing via Mixcloud');
+    setTimeout(() => setStatus(''), 4000);
+
+    isPlaying = false;
+    viz.classList.add('paused');
+    setPlayIcon(false);
+    setTitle('class');
   }
 
-  // Level 3 is checked after widget READY — see bindChannel()
-  // If class widget doesn't fire READY within 10s → blockScore++
-
-  async function runAvailabilityChecks() {
-    // Run Level 1 + 2 in parallel
-    await Promise.all([checkLevel1_Geo(), checkLevel2_Network()]);
-    // Level 3 runs separately via widget timeout (see bindChannel)
-    // After 12s total, evaluate
-    setTimeout(evaluateBlock, 7000);
-  }
-
-  function evaluateBlock() {
-    if (scBlocked) return; // already switched
-    if (blockScore >= 2) {
-      console.log('[bichradio] SC confirmed blocked (score ' + blockScore + '/3) — switching class to Mixcloud');
-      scBlocked = true;
-      switchClassToMixcloud();
-    } else {
-      console.log('[bichradio] SC available (block score ' + blockScore + '/3) — no fallback needed');
-    }
-  }
-
-  function switchClassToMixcloud() {
-    const btn = document.getElementById('btn-class');
-    if (!btn) return;
-
-    // Smoothly hide the sexy button
-    const sexyBtn = document.getElementById('btn-sexy');
-    if (sexyBtn) {
-      sexyBtn.style.transition = 'opacity 0.6s ease, transform 0.6s ease, max-width 0.6s ease, padding 0.6s ease, margin 0.6s ease';
-      sexyBtn.style.opacity    = '0';
-      sexyBtn.style.transform  = 'scale(0.8)';
-      setTimeout(() => {
-        sexyBtn.style.maxWidth = '0';
-        sexyBtn.style.padding  = '0';
-        sexyBtn.style.margin   = '0';
-        sexyBtn.style.border   = 'none';
-        sexyBtn.style.overflow = 'hidden';
-      }, 600);
-    }
-
-    btn.addEventListener('click', openMixcloud, { once: false });
-    btn.dataset.mixcloud = '1';
-    btn.title = 'Opens Mixcloud (SoundCloud unavailable in your region)';
-
-    if (activeId === 'class') {
-      active().widget.pause();
-      setStatus('SoundCloud unavailable — opening Mixcloud…');
-      setTimeout(() => window.open(MIXCLOUD_CLASS_URL, '_blank'), 800);
-    }
-  }
-
-  function openMixcloud(e) {
-    e.stopImmediatePropagation();
-    window.open(MIXCLOUD_CLASS_URL, '_blank');
-    // Don't switch activeId or mess with players
-  }
-
-  runAvailabilityChecks();
+  // Start geo check immediately
+  checkGeo();
 
   // ── Two widgets, both pre-loaded silently ────────────────
   const channels = {
@@ -665,7 +666,23 @@
   // Natural finish path bypasses this entirely (seekTo(0) in playTrack)
   function doSeek(w) {
     if (seekDone || seekFromStart) return;
-    seekDone  = true;
+    seekDone = true;
+
+    // Check track title first — some artists always start at 7 min
+    w.getCurrentSound(s => {
+      if (!s) return doRandomSeek(w);
+      const title = (s.title || '').toLowerCase();
+      const isSpecial = title.includes('david melo') || title.includes('pasha m');
+      if (isSpecial) {
+        console.log('[bichradio] special artist — seeking to 7 min');
+        w.seekTo(7 * 60 * 1000);
+      } else {
+        doRandomSeek(w);
+      }
+    });
+  }
+
+  function doRandomSeek(w) {
     seekTried = true;
     const seekTo = SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN));
     w.seekTo(seekTo);
@@ -708,21 +725,18 @@
 
   // ── Bind events for one channel widget ───────────────────
   function bindChannel(ch) {
-    // ── Level 3: widget READY timeout (class only) ────────────
-    // If SC widget doesn't fire READY within 10s, SC is likely blocked
-    let readyTimer = null;
+    // If SC class widget doesn't fire READY within 5s, SC is blocked
     if (ch.id === 'class') {
-      readyTimer = setTimeout(() => {
-        if (!ch.ready) {
-          blockScore++;
-          console.log('[bichradio] Level 3: class widget READY timeout — SC likely blocked');
-          evaluateBlock();
-        }
+      scReadyTimer = setTimeout(() => {
+        if (!ch.ready) onScReadyTimeout();
       }, 5000);
     }
 
     ch.widget.bind(SC.Widget.Events.READY, () => {
-      if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
+      if (ch.id === 'class' && scReadyTimer) {
+        clearTimeout(scReadyTimer);
+        scReadyTimer = null;
+      }
       ch.widget.getSounds(sounds => {
         if (!sounds.length) return;
         ch.tracks   = sounds;
@@ -861,9 +875,8 @@
   // ── Playlist buttons ─────────────────────────────────────
   document.querySelectorAll('.pl-btn').forEach(btn => {
     btn.addEventListener('click', () => {
+      if (mcMode) return; // buttons are disabled in MC mode, but guard anyway
       const toId = btn.id === 'btn-sexy' ? 'sexy' : 'class';
-      // If class is in Mixcloud fallback mode, openMixcloud handler takes over
-      if (toId === 'class' && btn.dataset.mixcloud) return;
       if (toId === activeId || switching) return;
       document.querySelectorAll('.pl-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
@@ -873,6 +886,14 @@
 
   // ── Play / Pause ─────────────────────────────────────────
   document.getElementById('btn-play').addEventListener('click', () => {
+    // Mixcloud fallback mode
+    if (mcMode) {
+      if (!mcWidget) { setStatus('loading Mixcloud…'); return; }
+      if (mcPlaying) mcWidget.pause();
+      else           mcWidget.play();
+      return;
+    }
+    // SoundCloud mode
     if (switching) return;
     const ch = active();
     if (isPlaying) {
@@ -886,14 +907,14 @@
   });
 
   document.getElementById('btn-next').addEventListener('click', () => {
-    if (switching) return;
+    if (mcMode || switching) return;
     const ch = active();
     currentIdx = (currentIdx + 1) % ch.shuffled.length;
     playTrack(currentIdx);
   });
 
   document.getElementById('btn-prev').addEventListener('click', () => {
-    if (switching) return;
+    if (mcMode || switching) return;
     const ch = active();
     currentIdx = (currentIdx - 1 + ch.shuffled.length) % ch.shuffled.length;
     playTrack(currentIdx);
