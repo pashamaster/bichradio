@@ -555,6 +555,7 @@
     seekDone      = false;
     seekTried     = false;
     seekFromStart = fromStart;
+    resetPositionTimer();
     clearInterval(playRetry);
     const ch = active();
     ch.widget.skip(ch.shuffled[idx]);
@@ -801,6 +802,42 @@
     return { idle: elIdle, active: elActive };
   })();
 
+  let   positionTimer     = null;
+  let   positionStarted   = null;
+  let   positionElapsed   = 0;
+  const POSITION_DURATION = 3 * 60 * 60;
+
+  function startPositionTimer() {
+    stopPositionTimer();
+    positionStarted = Date.now();
+    positionTimer = setInterval(() => {
+      if (!navigator.mediaSession?.setPositionState) return;
+      const elapsed = positionElapsed + (Date.now() - positionStarted) / 1000;
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: POSITION_DURATION, playbackRate: 1,
+          position: Math.min(elapsed, POSITION_DURATION)
+        });
+      } catch(e) {}
+    }, 1000);
+  }
+
+  function stopPositionTimer() {
+    if (positionTimer) { clearInterval(positionTimer); positionTimer = null; }
+    if (positionStarted !== null) {
+      positionElapsed += (Date.now() - positionStarted) / 1000;
+      positionStarted  = null;
+    }
+  }
+
+  function resetPositionTimer() {
+    stopPositionTimer();
+    positionElapsed = 0;
+    if (navigator.mediaSession?.setPositionState) {
+      try { navigator.mediaSession.setPositionState({ duration: POSITION_DURATION, playbackRate: 1, position: 0 }); } catch(e) {}
+    }
+  }
+
   function updateMediaSession(title) {
     if (!('mediaSession' in navigator) || !silentAudio) return;
     silentAudio.idle.pause();
@@ -815,6 +852,7 @@
       ]
     });
     navigator.mediaSession.playbackState = 'playing';
+    startPositionTimer();
   }
 
   function pauseMediaSession() {
@@ -829,6 +867,7 @@
       ]
     });
     navigator.mediaSession.playbackState = 'paused';
+    stopPositionTimer();
   }
 
 
