@@ -389,8 +389,8 @@
   let userVolume = 80;
   let switching  = false;
   let playRetry  = null;
-  const SEEK_MIN      = 27 * 60 * 1000;
-  const SEEK_MAX      = 62 * 60 * 1000;
+  const SEEK_MIN      = 9 * 60 * 1000; 
+  const SEEK_MAX      = 35 * 60 * 1000;
   const SEEK_FALLBACK = 25 * 60 * 1000;
   let seekDone     = false;
   let seekTried    = false;
@@ -555,7 +555,6 @@
     seekDone      = false;
     seekTried     = false;
     seekFromStart = fromStart;
-    resetPositionTimer();
     clearInterval(playRetry);
     const ch = active();
     ch.widget.skip(ch.shuffled[idx]);
@@ -600,6 +599,7 @@
         isPlaying = true;
         viz.classList.remove('paused');
         setPlayIcon(true);
+        acquireWakeLock();
         ch.widget.getCurrentSound(s => {
           if (s) {
             setTitle(s.title);
@@ -625,6 +625,7 @@
       viz.classList.add('paused');
       setPlayIcon(false);
       pauseMediaSession();
+      releaseWakeLock();
     });
 
     ch.widget.bind(SC.Widget.Events.FINISH, () => {
@@ -802,42 +803,6 @@
     return { idle: elIdle, active: elActive };
   })();
 
-  let   positionTimer     = null;
-  let   positionStarted   = null;
-  let   positionElapsed   = 0;
-  const POSITION_DURATION = 3 * 60 * 60;
-
-  function startPositionTimer() {
-    stopPositionTimer();
-    positionStarted = Date.now();
-    positionTimer = setInterval(() => {
-      if (!navigator.mediaSession?.setPositionState) return;
-      const elapsed = positionElapsed + (Date.now() - positionStarted) / 1000;
-      try {
-        navigator.mediaSession.setPositionState({
-          duration: POSITION_DURATION, playbackRate: 1,
-          position: Math.min(elapsed, POSITION_DURATION)
-        });
-      } catch(e) {}
-    }, 1000);
-  }
-
-  function stopPositionTimer() {
-    if (positionTimer) { clearInterval(positionTimer); positionTimer = null; }
-    if (positionStarted !== null) {
-      positionElapsed += (Date.now() - positionStarted) / 1000;
-      positionStarted  = null;
-    }
-  }
-
-  function resetPositionTimer() {
-    stopPositionTimer();
-    positionElapsed = 0;
-    if (navigator.mediaSession?.setPositionState) {
-      try { navigator.mediaSession.setPositionState({ duration: POSITION_DURATION, playbackRate: 1, position: 0 }); } catch(e) {}
-    }
-  }
-
   function updateMediaSession(title) {
     if (!('mediaSession' in navigator) || !silentAudio) return;
     silentAudio.idle.pause();
@@ -852,7 +817,6 @@
       ]
     });
     navigator.mediaSession.playbackState = 'playing';
-    startPositionTimer();
   }
 
   function pauseMediaSession() {
@@ -867,9 +831,30 @@
       ]
     });
     navigator.mediaSession.playbackState = 'paused';
-    stopPositionTimer();
   }
 
+
+  // ── Wake Lock ─────────────────────────────────────────────
+  let wakeLock = null;
+
+  async function acquireWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    if (wakeLock && wakeLock.released === false) return;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => console.log('[bichradio] wake lock released'));
+    } catch(e) {}
+  }
+
+  async function releaseWakeLock() {
+    if (wakeLock && wakeLock.released === false) {
+      await wakeLock.release(); wakeLock = null;
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && isPlaying) acquireWakeLock();
+  });
 
   // ── Visit counter ─────────────────────────────────────────
   const COUNTER_URL = 'https://bichradiodb.p-masterov.workers.dev';
