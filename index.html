@@ -611,8 +611,8 @@
   let userVolume = 80;
   let switching  = false;
   let playRetry  = null;
-  const SEEK_MIN      = 27 * 60 * 1000; // random range start
-  const SEEK_MAX      = 62 * 60 * 1000; // random range end
+  const SEEK_MIN      = 9 * 60 * 1000;  // random range start
+  const SEEK_MAX      = 35 * 60 * 1000; // random range end
   const SEEK_FALLBACK = 25 * 60 * 1000; // fallback if track too short
   const FADE_MS    = 300;
   const FADE_STEPS = 3;
@@ -758,6 +758,7 @@
         isPlaying = true;
         viz.classList.remove('paused');
         setPlayIcon(true);
+        acquireWakeLock();
         ch.widget.getCurrentSound(s => {
           if (s) {
             setTitle(s.title);
@@ -782,6 +783,7 @@
       viz.classList.add('paused');
       setPlayIcon(false);
       pauseMediaSession();
+      releaseWakeLock();
     });
 
     ch.widget.bind(SC.Widget.Events.FINISH, () => {
@@ -1101,9 +1103,15 @@
     return { idle: elIdle, active: elActive };
   })();
 
+  // ── Lock screen position state ────────────────────────────
+  // Tracks elapsed seconds since playback started on this device.
+  // We don't know the actual track position (SC widget seek offset),
+  // but we can show how long it's been playing on this device —
+  // which is what the user actually cares about on a radio app.
+  // Duration is set to a large fixed value (3 hours) so the
+  // progress bar doesn't end prematurely.
   function updateMediaSession(title) {
     if (!('mediaSession' in navigator) || !silentAudio) return;
-    // Swap: pause idle, start active — track title shows on lock screen
     silentAudio.idle.pause();
     silentAudio.active.play().catch(() => {});
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -1120,7 +1128,6 @@
 
   function pauseMediaSession() {
     if (!('mediaSession' in navigator) || !silentAudio) return;
-    // Swap: pause active, resume idle — lock screen shows "bichradio" again
     silentAudio.active.pause();
     silentAudio.idle.play().catch(() => {});
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -1133,6 +1140,42 @@
     navigator.mediaSession.playbackState = 'paused';
   }
 
+
+  // ── Wake Lock — prevent Android screen sleep during playback ─
+  // Uses the Screen Wake Lock API (supported in Chrome/Android 84+)
+  // Tells the OS this page is actively playing media — same signal
+  // a YouTube video sends. Released automatically when tab loses focus
+  // or music is paused, re-acquired when playback resumes.
+  let wakeLock = null;
+
+  async function acquireWakeLock() {
+    if (!('wakeLock' in navigator)) return; // not supported
+    if (wakeLock && wakeLock.released === false) return; // already held
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      console.log('[bichradio] wake lock acquired');
+      // If OS releases it (e.g. battery saver), re-acquire when tab refocused
+      wakeLock.addEventListener('release', () => {
+        console.log('[bichradio] wake lock released by OS');
+      });
+    } catch(e) {
+      console.warn('[bichradio] wake lock failed:', e.message);
+    }
+  }
+
+  async function releaseWakeLock() {
+    if (wakeLock && wakeLock.released === false) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  }
+
+  // Re-acquire wake lock when tab becomes visible again (OS may have released it)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && isPlaying) {
+      acquireWakeLock();
+    }
+  });
 
   // ── Service worker + Push notifications ──────────────────
   const VAPID_PUBLIC_KEY = 'BNoxPSlXS8Zors0VfNKZeW13VRKpHPE1zV1b9N7bJiw63dDVLA9QVccfi9oUAMyl7cbdo1mKtzv78iQPxRUK0Qk';
