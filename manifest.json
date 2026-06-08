@@ -1,12 +1,27 @@
 {
   "name": "bichradio",
   "short_name": "bichradio",
-  "description": "Radio that shuffles from a bichradio playlist",
+  "description": "Ambient radio streaming live from SoundCloud playlists",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#0a0a0a",
   "orientation": "portrait",
+  "categories": ["music", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Play bichradio",
+      "short_name": "Play",
+      "description": "Start playing bichradio ambient radio",
+      "url": "/?action=play",
+      "icons": [
+        {
+          "src": "icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
   "icons": [
     {
       "src": "icon-192.png",
@@ -20,5 +35,14 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
-  ]
+  ],
+  "screenshots": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "form_factor": "narrow"
+    }
+  ],
+  "prefer_related_applications": false
 }
+
