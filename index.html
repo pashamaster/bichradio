@@ -1141,7 +1141,45 @@
   }
 
 
-  // ── Wake Lock — prevent Android screen sleep during playback ─
+  // ── AudioContext suspend handler ───────────────────────────
+  // Android (especially smart devices) suspends the AudioContext
+  // after 1-2 min of "inactivity" to save power. This catches that
+  // and resumes it immediately so playback doesn't stall.
+  let audioContext = null;
+
+  function initAudioContext() {
+    if (audioContext) return;
+    try {
+      // Get the context from the silent audio element
+      const silent = silentAudio?.active || document.querySelector('audio');
+      if (!silent) return;
+      // AudioContext from Web Audio API — different from <audio> element
+      // but we monitor it anyway
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    } catch(e) {}
+  }
+
+  function resumeAudioContext() {
+    if (!audioContext) return;
+    if (audioContext.state === 'suspended') {
+      audioContext.resume().then(() => {
+        console.log('[bichradio] AudioContext resumed from suspend');
+      }).catch(e => {
+        console.warn('[bichradio] AudioContext resume failed:', e.message);
+      });
+    }
+  }
+
+  // Monitor and resume if suspended (Android may suspend every 1-2 min)
+  setInterval(() => {
+    if (isPlaying) resumeAudioContext();
+  }, 3000); // check every 3 seconds during playback
+
+  // Also try to resume on any user interaction
+  document.addEventListener('click', initAudioContext, { once: true });
+  document.addEventListener('touchstart', initAudioContext, { once: true });
+
+
   // Uses the Screen Wake Lock API (supported in Chrome/Android 84+)
   // Tells the OS this page is actively playing media — same signal
   // a YouTube video sends. Released automatically when tab loses focus
