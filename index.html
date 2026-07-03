@@ -227,31 +227,7 @@
       transform: scale(1.05);
     }
 
-    .volume-row { display: flex; align-items: center; gap: 12px; width: 100%; max-width: 280px; }
-    .volume-row.hidden { display: none; }
-
-    .volume-icon { color: var(--muted); flex-shrink: 0; }
-
-    input[type="range"] {
-      -webkit-appearance: none;
-      appearance: none;
-      flex: 1;
-      height: 1px;
-      background: var(--border);
-      outline: none;
-      border-radius: 1px;
-    }
-
-    input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: var(--accent);
-      cursor: pointer;
-    }
-
-    #sc-widget-sexy, #sc-widget-class {
+    #sc-widget-sexy, #sc-widget-class, #mc-widget {
       position: absolute;
       width: 1px;
       height: 1px;
@@ -366,7 +342,6 @@
 
     .pwa-dismiss:hover { color: var(--text); }
 
-    /* Android variant — shows "Add to Home Screen" tap instruction */
     .pwa-banner.android .ios-hint  { display: none; }
     .pwa-banner.ios     .and-hint  { display: none; }
   </style>
@@ -390,8 +365,8 @@
     </div>
 
     <div class="playlist-btns">
-      <button class="pl-btn" id="btn-class" data-playlist="https%3A//soundcloud.com/pavel-masterov/sets/class">class</button>
-      <button class="pl-btn active" id="btn-sexy" data-playlist="https%3A//soundcloud.com/pavel-masterov/sets/sexy">sexy</button>
+      <button class="pl-btn" id="btn-class">class</button>
+      <button class="pl-btn active" id="btn-sexy">sexy</button>
     </div>
   </div>
 
@@ -407,11 +382,6 @@
       <button class="btn" id="btn-next" title="Next">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2-8.14 5.25 3.64L8 16.14V9.86zM16 6h2v12h-2z"/></svg>
       </button>
-    </div>
-    <div class="volume-row">
-      <svg class="volume-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
-      <input type="range" id="volume" min="0" max="100" value="80" />
-      <svg class="volume-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM16.5 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
     </div>
     <div class="loading-msg" id="status-msg">tap play to start</div>
     <div class="counter-wrap">
@@ -441,20 +411,10 @@
   <button class="pwa-dismiss" id="pwa-dismiss" aria-label="Dismiss">✕</button>
 </div>
 
+<!-- Only the 'sexy' iframe loads at start. 'class' + Mixcloud inject on demand. -->
 <iframe id="sc-widget-sexy"
   src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/sexy&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
   allow="autoplay">
-</iframe>
-<iframe id="sc-widget-class"
-  src="https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/class&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false"
-  allow="autoplay">
-</iframe>
-
-<!-- Mixcloud fallback — hidden until SC is confirmed blocked -->
-<iframe id="mc-widget"
-  src="https://www.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&autoplay=0&feed=%2Fpashakaef%2Fplaylists%2Fclass%2F"
-  allow="autoplay"
-  style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;bottom:0;left:0;">
 </iframe>
 
 <script src="https://w.soundcloud.com/player/api.js"></script>
@@ -467,7 +427,6 @@
       if (!res.ok) return;
       const data = await res.json();
       if (data.version && data.version !== PAGE_VERSION) {
-        // New deploy detected — wipe caches and reload once
         if ('caches' in window) {
           const keys = await caches.keys();
           await Promise.all(keys.map(k => caches.delete(k)));
@@ -477,25 +436,23 @@
     } catch(e) {}
   })();
 
-  // ── Visualizer bars ──────────────────────────────────────
+  // ── Visualizer bars (14 — lighter compositing than 22) ────
   const viz = document.getElementById('visualizer');
-  for (let i = 0; i < 22; i++) {
+  for (let i = 0; i < 14; i++) {
     const b = document.createElement('div');
     b.className = 'bar';
-    b.style.cssText = `--d:${(0.4 + Math.random() * 0.7).toFixed(2)}s; height:${8 + Math.floor(Math.random() * 40)}px;`;
+    b.style.setProperty('--d', (0.6 + Math.random() * 0.8).toFixed(2) + 's');
+    b.style.height = (10 + Math.random() * 34).toFixed(0) + 'px';
     viz.appendChild(b);
   }
 
-  // ── SC availability detection ─────────────────────────────
-  // Two signals: geo check + SC widget READY timeout.
-  // If either confirms blocked → switch to Mixcloud mode.
+  // ── Blocked-region detection + Mixcloud fallback ─────────
   const BLOCKED_COUNTRIES = ['RU', 'BY', 'KP', 'IR', 'CU', 'SY'];
-  let   mcMode            = false; // true = Mixcloud fallback active
-  let   mcWidget          = null;  // Mixcloud Widget API instance
-  let   mcPlaying         = false;
-  let   scReadyTimer      = null;  // fires if SC class widget never fires READY
+  let   mcMode       = false;
+  let   mcWidget     = null;
+  let   mcPlaying    = false;
+  let   scReadyTimer = null;
 
-  // Geo check — fast pre-signal
   async function checkGeo() {
     try {
       const res = await Promise.race([
@@ -504,45 +461,33 @@
       ]);
       if (!res.ok) return;
       const data = await res.json();
-      if (BLOCKED_COUNTRIES.includes(data.country_code)) {
-        console.log('[bichradio] geo blocked —', data.country_code);
-        activateMixcloud();
-      }
+      if (BLOCKED_COUNTRIES.includes(data.country_code)) activateMixcloud();
     } catch(e) {}
   }
 
-  // Called from bindChannel when class READY times out
   function onScReadyTimeout() {
-    if (!mcMode) {
-      console.log('[bichradio] SC READY timeout — activating Mixcloud');
-      activateMixcloud();
-    }
+    if (!mcMode) activateMixcloud();
   }
 
-  // ── Mixcloud mode ─────────────────────────────────────────
   function activateMixcloud() {
     if (mcMode) return;
     mcMode = true;
 
-    // Pause SC widgets
     try { channels.sexy.widget?.pause(); } catch(e) {}
-    try { channels.class.widget?.pause(); } catch(e) {}
+    try { channels.class?.widget?.pause(); } catch(e) {}
 
-    // Make MC iframe real and visible (it was hidden/tiny)
-    const mcIframe = document.getElementById('mc-widget');
-    mcIframe.style.cssText = [
-      'position:absolute', 'width:1px', 'height:1px',
-      'opacity:0', 'pointer-events:none', 'bottom:0', 'left:0'
-    ].join(';');
+    // Inject the Mixcloud iframe only now (not preloaded — saves memory)
+    const mcIframe = document.createElement('iframe');
+    mcIframe.id = 'mc-widget';
+    mcIframe.src = 'https://www.mixcloud.com/widget/iframe/?hide_cover=1&mini=1&autoplay=0&feed=%2Fpashakaef%2Fplaylists%2Fclass%2F';
+    mcIframe.allow = 'autoplay';
+    document.body.appendChild(mcIframe);
 
-    // Load Mixcloud Widget API
-    const script   = document.createElement('script');
-    script.src     = 'https://widget.mixcloud.com/media/js/widgetApi.js';
-    script.onload  = () => {
+    const script  = document.createElement('script');
+    script.src    = 'https://widget.mixcloud.com/media/js/widgetApi.js';
+    script.onload = () => {
       mcWidget = window.Mixcloud.PlayerWidget(mcIframe);
       mcWidget.ready.then(() => {
-        console.log('[bichradio] Mixcloud widget ready');
-
         mcWidget.events.play.on(() => {
           mcPlaying = true;
           viz.classList.remove('paused');
@@ -551,34 +496,25 @@
           setStatus('');
           updateMediaSession('class · mixcloud');
         });
-
         mcWidget.events.pause.on(() => {
           mcPlaying = false;
           viz.classList.add('paused');
           setPlayIcon(false);
           pauseMediaSession();
         });
-
         mcWidget.events.ended.on(() => {
           mcPlaying = false;
           viz.classList.add('paused');
           setPlayIcon(false);
         });
-
-        mcWidget.events.error.on(() => {
-          setStatus('stream error');
-          haptic?.error();
-        });
       });
     };
     document.body.appendChild(script);
 
-    // Update UI — disable all channel buttons, show status
     document.querySelectorAll('.pl-btn').forEach(btn => {
       btn.disabled = true;
       btn.title    = 'channel switching unavailable in your region';
     });
-    // Keep class button visually active since that's what plays
     document.getElementById('btn-class')?.classList.add('active');
     document.getElementById('btn-sexy')?.classList.remove('active');
 
@@ -591,39 +527,34 @@
     setTitle('class');
   }
 
-  // Start geo check immediately
   checkGeo();
 
-  // ── Two widgets, both pre-loaded silently ────────────────
+  // ── Channels — sexy loads now, class lazy-loads on switch ─
   const channels = {
-    sexy:  { id: 'sexy',  iframe: document.getElementById('sc-widget-sexy'),  widget: null, tracks: [], shuffled: [], ready: false },
-    class: { id: 'class', iframe: document.getElementById('sc-widget-class'), widget: null, tracks: [], shuffled: [], ready: false }
+    sexy:  { id: 'sexy',  iframe: document.getElementById('sc-widget-sexy'), widget: null, tracks: [], shuffled: [], ready: false },
+    class: { id: 'class', iframe: null, widget: null, tracks: [], shuffled: [], ready: false }
   };
-  channels.sexy.widget  = SC.Widget(channels.sexy.iframe);
-  channels.class.widget = SC.Widget(channels.class.iframe);
-
-  const volSlider = document.getElementById('volume');
+  channels.sexy.widget = SC.Widget(channels.sexy.iframe);
 
   // ── State ────────────────────────────────────────────────
   let activeId   = 'sexy';
   let isPlaying  = false;
   let currentIdx = 0;
-  let userVolume = 80;
+  const userVolume = 80; // fixed — volume handled by device, no in-app slider
   let switching  = false;
   let playRetry  = null;
-  const SEEK_MIN      = 9 * 60 * 1000;  // random range start
-  const SEEK_MAX      = 35 * 60 * 1000; // random range end
-  const SEEK_FALLBACK = 25 * 60 * 1000; // fallback if track too short
+  const SEEK_MIN      = 9 * 60 * 1000;
+  const SEEK_MAX      = 35 * 60 * 1000;
+  const SEEK_FALLBACK = 25 * 60 * 1000;
   const FADE_MS    = 300;
   const FADE_STEPS = 3;
 
-  let seekDone     = false; // true once seek attempted for current track
-  let seekTried    = false; // true after first seek, used to detect short-track FINISH
-  let seekFromStart = false; // true when next track should start from beginning (natural finish)
+  let seekDone      = false;
+  let seekTried     = false;
+  let seekFromStart = false;
 
   // ── Helpers ──────────────────────────────────────────────
-  function active()   { return channels[activeId]; }
-  function inactive() { return channels[activeId === 'sexy' ? 'class' : 'sexy']; }
+  function active() { return channels[activeId]; }
 
   function shuffle(arr) {
     const a = [...arr];
@@ -647,14 +578,13 @@
     document.getElementById('icon-pause').style.display = playing ? '' : 'none';
   }
 
-  // ── Smooth volume fade on a specific widget ───────────────
   function fadeWidget(w, fromVol, toVol, ms, onDone) {
     let step = 0;
     const interval = ms / FADE_STEPS;
     const timer = setInterval(() => {
       step++;
       const t    = step / FADE_STEPS;
-      const ease = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2; // ease-in-out cubic
+      const ease = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2;
       const vol  = Math.round(fromVol + (toVol - fromVol) * ease);
       w.setVolume(Math.max(0, Math.min(100, vol)));
       if (step >= FADE_STEPS) { clearInterval(timer); if (onDone) onDone(); }
@@ -662,19 +592,14 @@
     return timer;
   }
 
-  // ── Seek — only called for user-triggered skips ──────────
-  // Natural finish path bypasses this entirely (seekTo(0) in playTrack)
+  // ── Seek — only for user-triggered skips ─────────────────
   function doSeek(w) {
     if (seekDone || seekFromStart) return;
     seekDone = true;
-
-    // Check track title first — some artists always start at 7 min
     w.getCurrentSound(s => {
       if (!s) return doRandomSeek(w);
       const title = (s.title || '').toLowerCase();
-      const isSpecial = title.includes('david melo') || title.includes('pasha m');
-      if (isSpecial) {
-        console.log('[bichradio] special artist — seeking to 7 min');
+      if (title.includes('david melo') || title.includes('pasha m')) {
         w.seekTo(7 * 60 * 1000);
       } else {
         doRandomSeek(w);
@@ -702,7 +627,7 @@
     playRetry = setInterval(attempt, 800);
   }
 
-  // ── Play a track on the active channel ───────────────────
+  // ── Play a track ─────────────────────────────────────────
   function playTrack(idx, fromStart = false) {
     seekDone      = false;
     seekTried     = false;
@@ -712,8 +637,6 @@
     ch.widget.skip(ch.shuffled[idx]);
     ch.widget.setVolume(userVolume);
     if (fromStart) {
-      // Natural finish — seek to position 0 explicitly so there's
-      // no ambiguity about where playback starts, then play
       setTimeout(() => {
         ch.widget.seekTo(0);
         ch.widget.play();
@@ -723,9 +646,21 @@
     }
   }
 
+  // ── Lazy-load the class channel iframe on first switch ────
+  function ensureClassLoaded() {
+    if (channels.class.iframe) return;
+    const f = document.createElement('iframe');
+    f.id = 'sc-widget-class';
+    f.src = 'https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/pavel-masterov/sets/class&auto_play=false&show_artwork=false&show_user=false&show_reposts=false&show_teaser=false&visual=false';
+    f.allow = 'autoplay';
+    document.body.appendChild(f);
+    channels.class.iframe = f;
+    channels.class.widget = SC.Widget(f);
+    bindChannel(channels.class);
+  }
+
   // ── Bind events for one channel widget ───────────────────
   function bindChannel(ch) {
-    // If SC class widget doesn't fire READY within 5s, SC is blocked
     if (ch.id === 'class') {
       scReadyTimer = setTimeout(() => {
         if (!ch.ready) onScReadyTimeout();
@@ -742,14 +677,12 @@
         ch.tracks   = sounds;
         ch.shuffled = shuffle(sounds.map((_, i) => i));
         ch.ready    = true;
-        // Keep inactive channel silenced
         if (ch.id !== activeId) ch.widget.setVolume(0);
       });
     });
 
     ch.widget.bind(SC.Widget.Events.PLAY, () => {
       if (ch.id !== activeId) {
-        // Inactive channel fired — silence and pause it immediately
         ch.widget.setVolume(0);
         ch.widget.pause();
         return;
@@ -768,7 +701,6 @@
         setStatus('');
         setTimeout(() => doSeek(ch.widget), 400);
       }
-      // Fade in new channel (3 steps × 100ms = 300ms)
       if (switching) {
         fadeWidget(ch.widget, 0, userVolume, FADE_MS, () => {
           switching = false;
@@ -789,15 +721,12 @@
     ch.widget.bind(SC.Widget.Events.FINISH, () => {
       if (ch.id !== activeId) return;
       isPlaying = false;
-      // Short-track fallback: if FINISH fired right after our seek,
-      // the track was too short — retry at SEEK_FALLBACK
       if (seekTried) {
         seekTried = false;
         ch.widget.seekTo(SEEK_FALLBACK);
         ch.widget.play();
         return;
       }
-      // Natural finish — next track starts from beginning
       currentIdx = (currentIdx + 1) % ch.shuffled.length;
       playTrack(currentIdx, true);
     });
@@ -811,11 +740,11 @@
   }
 
   bindChannel(channels.sexy);
-  bindChannel(channels.class);
 
-  // ── Channel switch — no iframe reload, near-instant ───────
+  // ── Channel switch ───────────────────────────────────────
   function switchChannel(toId) {
     if (switching || toId === activeId) return;
+    if (toId === 'class') ensureClassLoaded(); // lazy-load on first use
     switching = true;
     clearInterval(playRetry);
     document.querySelectorAll('.pl-btn').forEach(b => b.disabled = true);
@@ -824,20 +753,17 @@
     const to   = channels[toId];
 
     const startSwitch = () => {
-      // Pre-silence incoming, set activeId so events route correctly
       to.widget.setVolume(0);
       activeId   = toId;
       currentIdx = 0;
-      seekDone    = false; seekTried = false;
-      isPlaying   = false;
+      seekDone   = false; seekTried = false;
+      isPlaying  = false;
 
-      // Fade out old channel (3 steps × 100ms = 300ms)
       fadeWidget(from.widget, userVolume, 0, FADE_MS, () => {
         from.widget.pause();
         from.widget.setVolume(0);
       });
 
-      // Start new channel immediately (will fade in via PLAY event handler)
       to.widget.skip(to.shuffled[currentIdx]);
       reliablePlay(to.widget);
 
@@ -846,7 +772,6 @@
       viz.classList.add('paused');
       setPlayIcon(false);
 
-      // Safety release after 6s if something went wrong
       setTimeout(() => {
         if (switching) {
           switching = false;
@@ -864,7 +789,7 @@
       const wait = setInterval(() => {
         waited += 250;
         if (to.ready) { clearInterval(wait); startSwitch(); }
-        else if (waited > 6000) {
+        else if (waited > 8000) {
           clearInterval(wait);
           switching = false;
           document.querySelectorAll('.pl-btn').forEach(b => b.disabled = false);
@@ -877,7 +802,7 @@
   // ── Playlist buttons ─────────────────────────────────────
   document.querySelectorAll('.pl-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      if (mcMode) return; // buttons are disabled in MC mode, but guard anyway
+      if (mcMode) return;
       const toId = btn.id === 'btn-sexy' ? 'sexy' : 'class';
       if (toId === activeId || switching) return;
       document.querySelectorAll('.pl-btn').forEach(b => b.classList.remove('active'));
@@ -888,14 +813,12 @@
 
   // ── Play / Pause ─────────────────────────────────────────
   document.getElementById('btn-play').addEventListener('click', () => {
-    // Mixcloud fallback mode
     if (mcMode) {
       if (!mcWidget) { setStatus('loading Mixcloud…'); return; }
       if (mcPlaying) mcWidget.pause();
       else           mcWidget.play();
       return;
     }
-    // SoundCloud mode
     if (switching) return;
     const ch = active();
     if (isPlaying) {
@@ -922,23 +845,7 @@
     playTrack(currentIdx);
   });
 
-  // ── Volume ───────────────────────────────────────────────
-  volSlider.addEventListener('input', e => {
-    userVolume = parseInt(e.target.value);
-    if (!switching) active().widget.setVolume(userVolume);
-  });
-
-  setInterval(() => {
-    if (switching) return;
-    active().widget.getVolume(v => {
-      const r = Math.round(v);
-      if (Math.abs(r - userVolume) > 2) { userVolume = r; volSlider.value = r; }
-    });
-  }, 700);
-
-  // ── Visit counter ─────────────────────────────────────────
-  // Counter calls a Cloudflare Worker proxy — no tokens in client code.
-  // Set this to your deployed Worker URL after running: wrangler deploy
+  // ── Visit counter ────────────────────────────────────────
   const COUNTER_URL = 'https://bichradiodb.p-masterov.workers.dev';
 
   function showCount(n) {
@@ -947,36 +854,20 @@
 
   async function incrementCounter() {
     try {
-      // POST /increment — Worker handles Gist read/write securely
       const res  = await fetch(`${COUNTER_URL}/increment`, { method: 'POST' });
       if (!res.ok) throw new Error(`Worker responded ${res.status}`);
       const data = await res.json();
       showCount(data.count);
-      console.log('[bichradio] counter:', data.count);
     } catch(e) {
-      console.warn('[bichradio] counter increment failed:', e.message);
-      // Fallback: try to at least show current count
       try {
         const res  = await fetch(`${COUNTER_URL}/count`);
         const data = await res.json();
         if (data.count != null) showCount(data.count);
-      } catch(e2) {
-        console.warn('[bichradio] counter read fallback failed:', e2.message);
-      }
+      } catch(e2) {}
     }
   }
 
   incrementCounter();
-
-  // ── Hide volume bar on mobile/PWA ────────────────────────
-  (function() {
-    const isMobile  = /iphone|ipad|ipod|android/i.test(navigator.userAgent);
-    const isPWA     = window.matchMedia('(display-mode: standalone)').matches
-                   || window.navigator.standalone === true;
-    if (isMobile || isPWA) {
-      document.querySelector('.volume-row').classList.add('hidden');
-    }
-  })();
 
   // ── PWA install banner ───────────────────────────────────
   (function() {
@@ -984,11 +875,9 @@
     const dismiss = document.getElementById('pwa-dismiss');
     const STORAGE_KEY = 'bichradio-pwa-dismissed';
 
-    // Don't show if already dismissed, or already running as installed PWA
     const isInstalled = window.matchMedia('(display-mode: standalone)').matches
       || window.navigator.standalone === true;
     const wasDismissed = sessionStorage.getItem(STORAGE_KEY);
-
     if (isInstalled || wasDismissed) return;
 
     const ua = navigator.userAgent;
@@ -997,22 +886,18 @@
     const isMobile  = isIOS || isAndroid;
     const isSafari  = isIOS && /safari/i.test(ua) && !/fxios/i.test(ua);
 
-    // iOS: only show in Safari (Chrome on iOS can't install PWAs)
-    // Android: show in any mobile browser
     if (!isMobile) return;
     if (isIOS && !isSafari) return;
 
     banner.classList.add('visible');
     banner.classList.add(isIOS ? 'ios' : 'android');
 
-    // Android: intercept the beforeinstallprompt for a native prompt
     let deferredPrompt = null;
     window.addEventListener('beforeinstallprompt', e => {
       e.preventDefault();
       deferredPrompt = e;
     });
 
-    // Tapping the banner body on Android triggers native install prompt
     banner.addEventListener('click', async e => {
       if (e.target === dismiss) return;
       if (deferredPrompt) {
@@ -1021,12 +906,9 @@
         if (outcome === 'accepted') hideBanner();
         deferredPrompt = null;
       }
-      // iOS: tapping does nothing extra — user follows the text instructions
     });
 
     dismiss.addEventListener('click', hideBanner);
-
-    // Auto-hide after 12 seconds
     setTimeout(hideBanner, 12000);
 
     function hideBanner() {
@@ -1038,18 +920,9 @@
     }
   })();
 
-  // ── Media Session (lock screen) ──────────────────────────
-  // The browser only assigns MediaSession to pages that own a native <audio>
-  // element. Since our audio lives in a cross-origin SC iframe, we play a
-  // silent looping tone from THIS page to claim the session, then set our
-  // metadata on top of it.
-  // ── Media Session ────────────────────────────────────────
-  // Two silent MP3s served from our own domain:
-  //   silent-bichradio.mp3 — ID3 title = "bichradio", plays when
-  //                          idle/paused so lock screen always shows
-  //                          "bichradio" instead of "SoundCloud Widget"
-  //   silent.mp3           — plain silent, plays while music is active
-  //                          so our MediaMetadata track title shows on top
+  // ── Media Session (lock screen / CarPlay) ────────────────
+  // Two silent MP3s claim the media session so CarPlay/lock screen
+  // shows "bichradio" + track title instead of "SoundCloud Widget".
   const silentAudio = (function() {
     if (!('mediaSession' in navigator)) return null;
 
@@ -1064,32 +937,33 @@
       return el;
     };
 
-    const elIdle   = make('/silent-bichradio.mp3'); // shown on lock screen when idle
-    const elActive = make('/silent.mp3');            // plays while music is active
+    const elIdle   = make('/silent-bichradio.mp3');
+    const elActive = make('/silent.mp3');
 
     const ch = () => channels[activeId];
 
     navigator.mediaSession.setActionHandler('play', () => {
+      if (mcMode) { mcWidget?.play(); return; }
       ch().widget.setVolume(userVolume);
       reliablePlay(ch().widget);
     });
     navigator.mediaSession.setActionHandler('pause', () => {
+      if (mcMode) { mcWidget?.pause(); return; }
       ch().widget.pause();
     });
     navigator.mediaSession.setActionHandler('nexttrack', () => {
+      if (mcMode) return;
       currentIdx = (currentIdx + 1) % ch().shuffled.length;
       playTrack(currentIdx);
     });
     navigator.mediaSession.setActionHandler('previoustrack', () => {
+      if (mcMode) return;
       currentIdx = (currentIdx - 1 + ch().shuffled.length) % ch().shuffled.length;
       playTrack(currentIdx);
     });
 
-    // Claim the session on first user tap — start idle audio
-    // so lock screen shows "bichradio" from the very first interaction
     document.addEventListener('click', function claimSession() {
       elIdle.play().catch(() => {});
-      // Set initial metadata immediately
       navigator.mediaSession.metadata = new MediaMetadata({
         title: 'bichradio', artist: 'bichradio', album: 'on air',
         artwork: [
@@ -1103,13 +977,6 @@
     return { idle: elIdle, active: elActive };
   })();
 
-  // ── Lock screen position state ────────────────────────────
-  // Tracks elapsed seconds since playback started on this device.
-  // We don't know the actual track position (SC widget seek offset),
-  // but we can show how long it's been playing on this device —
-  // which is what the user actually cares about on a radio app.
-  // Duration is set to a large fixed value (3 hours) so the
-  // progress bar doesn't end prematurely.
   function updateMediaSession(title) {
     if (!('mediaSession' in navigator) || !silentAudio) return;
     silentAudio.idle.pause();
@@ -1140,79 +1007,25 @@
     navigator.mediaSession.playbackState = 'paused';
   }
 
-
-  // ── AudioContext suspend handler ───────────────────────────
-  // Android (especially smart devices) suspends the AudioContext
-  // after 1-2 min of "inactivity" to save power. This catches that
-  // and resumes it immediately so playback doesn't stall.
-  let audioContext = null;
-
-  function initAudioContext() {
-    if (audioContext) return;
-    try {
-      // Get the context from the silent audio element
-      const silent = silentAudio?.active || document.querySelector('audio');
-      if (!silent) return;
-      // AudioContext from Web Audio API — different from <audio> element
-      // but we monitor it anyway
-      audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    } catch(e) {}
-  }
-
-  function resumeAudioContext() {
-    if (!audioContext) return;
-    if (audioContext.state === 'suspended') {
-      audioContext.resume().then(() => {
-        console.log('[bichradio] AudioContext resumed from suspend');
-      }).catch(e => {
-        console.warn('[bichradio] AudioContext resume failed:', e.message);
-      });
-    }
-  }
-
-  // Monitor and resume if suspended (Android may suspend every 1-2 min)
-  setInterval(() => {
-    if (isPlaying) resumeAudioContext();
-  }, 3000); // check every 3 seconds during playback
-
-  // Also try to resume on any user interaction
-  document.addEventListener('click', initAudioContext, { once: true });
-  document.addEventListener('touchstart', initAudioContext, { once: true });
-
-
-  // Uses the Screen Wake Lock API (supported in Chrome/Android 84+)
-  // Tells the OS this page is actively playing media — same signal
-  // a YouTube video sends. Released automatically when tab loses focus
-  // or music is paused, re-acquired when playback resumes.
+  // ── Wake Lock — prevent screen sleep during playback ─────
+  // (No-op on CarPlay/iOS where it isn't supported — guarded.)
   let wakeLock = null;
 
   async function acquireWakeLock() {
-    if (!('wakeLock' in navigator)) return; // not supported
-    if (wakeLock && wakeLock.released === false) return; // already held
+    if (!('wakeLock' in navigator)) return;
+    if (wakeLock) return;
     try {
       wakeLock = await navigator.wakeLock.request('screen');
-      console.log('[bichradio] wake lock acquired');
-      // If OS releases it (e.g. battery saver), re-acquire when tab refocused
-      wakeLock.addEventListener('release', () => {
-        console.log('[bichradio] wake lock released by OS');
-      });
-    } catch(e) {
-      console.warn('[bichradio] wake lock failed:', e.message);
-    }
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch(e) {}
   }
 
   async function releaseWakeLock() {
-    if (wakeLock && wakeLock.released === false) {
-      await wakeLock.release();
-      wakeLock = null;
-    }
+    if (wakeLock) { try { await wakeLock.release(); } catch(e) {} wakeLock = null; }
   }
 
-  // Re-acquire wake lock when tab becomes visible again (OS may have released it)
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && isPlaying) {
-      acquireWakeLock();
-    }
+    if (document.visibilityState === 'visible' && isPlaying) acquireWakeLock();
   });
 
   // ── Service worker + Push notifications ──────────────────
@@ -1227,56 +1040,40 @@
 
   async function subscribeToPush(swReg) {
     try {
-      // Check if already subscribed
       let sub = await swReg.pushManager.getSubscription();
-
       if (!sub) {
         sub = await swReg.pushManager.subscribe({
           userVisibleOnly:      true,
           applicationServerKey: urlBase64ToUint8(VAPID_PUBLIC_KEY)
         });
       }
-
-      // Send subscription to Worker
       await fetch(`${COUNTER_URL}/push/subscribe`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(sub.toJSON())
       });
-
-      console.log('[bichradio] push: subscribed');
-    } catch(e) {
-      console.warn('[bichradio] push subscribe failed:', e.message);
-    }
+    } catch(e) {}
   }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js')
       .then(async reg => {
-        // Only ask for push permission on mobile PWA installs
-        // to avoid annoying desktop users — ask after first play
         const isMobilePWA = (
           window.matchMedia('(display-mode: standalone)').matches ||
           navigator.standalone
         ) && /iphone|ipad|ipod|android/i.test(navigator.userAgent);
 
-        if (!isMobilePWA) return;
-        if (!('PushManager' in window)) return;
+        if (!isMobilePWA || !('PushManager' in window)) return;
 
-        // Wait for user to tap play before asking permission
-        // (browsers require a user gesture for notification permission on some platforms)
-        document.getElementById('btn-play').addEventListener('click', async function askOnce() {
+        document.getElementById('btn-play').addEventListener('click', function askOnce() {
           document.getElementById('btn-play').removeEventListener('click', askOnce);
-          // Small delay so the click feels intentional, not jarring
           setTimeout(async () => {
             const permission = await Notification.requestPermission();
-            if (permission === 'granted') {
-              await subscribeToPush(reg);
-            }
+            if (permission === 'granted') await subscribeToPush(reg);
           }, 3000);
         }, { once: true });
       })
-      .catch(console.warn);
+      .catch(() => {});
   }
 </script>
 </body>
