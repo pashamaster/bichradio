@@ -1,183 +1,100 @@
 // ── bichradio service worker ─────────────────────────────
-// Two separate caches:
-//   SHELL_CACHE  — app shell (index.html, manifest, fonts) — cache-first
-//   AUDIO_CACHE  — SoundCloud audio streams — 3MB rolling buffer
+// App shell cache + push notifications.
+// (SoundCloud audio is played inside a cross-origin iframe, so this worker
+//  never sees those requests — there is nothing to cache or buffer there.)
 
-const SHELL_CACHE = 'bichradio-shell-v3';
-const AUDIO_CACHE = 'bichradio-audio-v2';
-const AUDIO_MAX_BYTES = 3 * 1024 * 1024; // 3 MB hard cap
+const SHELL_CACHE = 'bichradio-shell-v4';
 
-const SHELL_ASSETS = ['/', '/index.html', '/manifest.json', '/silent.mp3', '/silent-bichradio.mp3'];
+const SHELL_ASSETS = [
+  '/', '/index.html', '/manifest.json',
+  '/silent.mp3', '/silent-bichradio.mp3',
+  '/apple-touch-icon.png', '/icon-192.png', '/icon-512.png', '/favicon-32.png'
+];
 // version.json is intentionally excluded — always fetched fresh
 
 // ── Install: pre-cache shell assets ──────────────────────
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(SHELL_CACHE).then(c => c.addAll(SHELL_ASSETS))
-  );
+  e.waitUntil(caches.open(SHELL_CACHE).then(c => c.addAll(SHELL_ASSETS)));
   self.skipWaiting();
 });
 
-// ── Activate: remove old caches ──────────────────────────
+// ── Activate: remove old caches (including the retired audio cache) ──
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(
-        keys
-          .filter(k => k !== SHELL_CACHE && k !== AUDIO_CACHE)
-          .map(k => caches.delete(k))
-      )
+      Promise.all(keys.filter(k => k !== SHELL_CACHE).map(k => caches.delete(k)))
     )
   );
   self.clients.claim();
 });
-
-// ── Helpers ───────────────────────────────────────────────
-function isAudioStream(url) {
-  return (
-    url.includes('cf-media.sndcdn.com') ||
-    url.includes('cf3-media.sndcdn.com') ||
-    url.includes('cf4-media.sndcdn.com') ||
-    (url.includes('.sndcdn.com/') && (url.includes('.mp3') || url.includes('stream')))
-  );
-}
 
 function isShellAsset(url) {
   return (
     url.includes('/index.html') ||
     url.includes('/manifest.json') ||
     url.includes('/sw.js') ||
-    url.endsWith('/') ||
-    url.includes('fonts.googleapis.com') ||
-    url.includes('fonts.gstatic.com')
+    url.endsWith('/')
   );
 }
 
-// ── Enforce 3MB audio cache cap ───────────────────────────
-async function enforceAudioCap() {
-  try {
-    const cache   = await caches.open(AUDIO_CACHE);
-    const keys    = await cache.keys();
-    let   total   = 0;
-    const entries = [];
-
-    for (const req of keys) {
-      const res = await cache.match(req);
-      if (!res) continue;
-      const clone = res.clone();
-      const buf   = await clone.arrayBuffer();
-      entries.push({ req, size: buf.byteLength });
-      total += buf.byteLength;
-    }
-
-    // Evict oldest entries first until under cap
-    let i = 0;
-    while (total > AUDIO_MAX_BYTES && i < entries.length) {
-      await cache.delete(entries[i].req);
-      total -= entries[i].size;
-      i++;
-    }
-  } catch(e) {}
-}
-
-// ── Cache audio with 3MB cap ──────────────────────────────
-async function cacheAudioResponse(request, networkResponse) {
-  // Only cache full responses, not range requests
-  if (networkResponse.status !== 200) return networkResponse;
-
-  try {
-    const cache  = await caches.open(AUDIO_CACHE);
-    const clone  = networkResponse.clone();
-    const reader = clone.body.getReader();
-    const chunks = [];
-    let   total  = 0;
-
-    // Buffer up to AUDIO_MAX_BYTES
-    while (total < AUDIO_MAX_BYTES) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      total += value.byteLength;
-    }
-    reader.cancel();
-
-    // Stitch chunks into one buffer
-    const buffer = new Uint8Array(total);
-    let   offset = 0;
-    for (const chunk of chunks) { buffer.set(chunk, offset); offset += chunk.byteLength; }
-
-    // Store the buffered portion
-    const toCache = new Response(buffer, {
-      status: 200,
-      headers: { 'Content-Type': networkResponse.headers.get('Content-Type') || 'audio/mpeg' }
-    });
-    await cache.put(request, toCache);
-
-    // Enforce cap async (don't block the response)
-    enforceAudioCap();
-
-    // Always return the original network response so browser gets the full stream
-    return networkResponse;
-
-  } catch(e) {
-    return networkResponse;
-  }
-}
-
-// ── Fetch handler ─────────────────────────────────────────
+// ── Fetch ─────────────────────────────────────────────────
 self.addEventListener('fetch', e => {
-  const url = e.request.url;
+  const req = e.request;
+  if (req.method !== 'GET') return;
+
+  const url = req.url;
 
   // version.json — always network, never cache
   if (url.includes('version.json')) {
-    e.respondWith(fetch(e.request, { cache: 'no-store' }));
+    e.respondWith(fetch(req, { cache: 'no-store' }));
     return;
   }
+
+  // Other origins (SoundCloud, Mixcloud, fonts, the counter Worker) go straight to the network
+  if (new URL(url).origin !== self.location.origin) return;
 
   // App shell — cache first
   if (isShellAsset(url)) {
-    e.respondWith(
-      caches.match(e.request).then(cached => cached || fetch(e.request))
-    );
+    e.respondWith(caches.match(req).then(cached => cached || fetch(req)));
     return;
   }
 
-  // SoundCloud audio streams — cache first, network fallback + background cache
-  if (isAudioStream(url)) {
-    e.respondWith(
-      caches.open(AUDIO_CACHE).then(async cache => {
-        const cached = await cache.match(e.request);
-        if (cached) {
-          // Serve from cache, refresh in background
-          fetch(e.request).then(res => {
-            if (res && res.status === 200) cacheAudioResponse(e.request, res);
-          }).catch(() => {});
-          return cached;
-        }
-        // Not in cache — fetch and cache simultaneously
-        const res = await fetch(e.request);
-        cacheAudioResponse(e.request, res.clone());
-        return res;
-      }).catch(() => fetch(e.request))
-    );
-    return;
-  }
-
-  // SoundCloud widget/API — network only
-  if (url.includes('soundcloud.com') || url.includes('sndcdn.com')) {
-    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
-    return;
-  }
-
-  // Everything else — network first
-  e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+  // Everything else on our domain — network first, cache as offline fallback
+  e.respondWith(fetch(req).catch(() => caches.match(req)));
 });
 
-// ── Message from page: clear audio cache on channel switch ─
-self.addEventListener('message', e => {
-  if (e.data === 'CLEAR_AUDIO_CACHE') {
-    caches.delete(AUDIO_CACHE).then(() => {
-      if (e.source) e.source.postMessage('AUDIO_CACHE_CLEARED');
-    });
-  }
+// ── Push notifications ────────────────────────────────────────
+self.addEventListener('push', e => {
+  let data = { title: 'bichradio', body: 'tune your day with bichradio!' };
+  try { data = e.data.json(); } catch(err) {}
+
+  e.waitUntil(
+    self.registration.showNotification(data.title, {
+      body:    data.body,
+      icon:    '/icon-192.png',
+      badge:   '/icon-192.png',
+      vibrate: [100, 50, 100],
+      data:    { url: data.url || '/' },
+      actions: [{ action: 'open', title: 'Play now' }]
+    })
+  );
+});
+
+// ── Notification click: open/focus the app ───────────────────
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = e.notification.data?.url || '/';
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(list => {
+        // If app already open, focus it
+        for (const client of list) {
+          if (client.url.includes(self.location.origin) && 'focus' in client) {
+            return client.focus();
+          }
+        }
+        // Otherwise open new window
+        return clients.openWindow(url);
+      })
+  );
 });

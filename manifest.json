@@ -3,46 +3,16 @@
   "short_name": "bichradio",
   "description": "Ambient radio streaming live from SoundCloud playlists",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#0a0a0a",
+  "background_color": "#171717",
   "theme_color": "#0a0a0a",
-  "orientation": "portrait",
-  "categories": ["music", "productivity"],
-  "shortcuts": [
-    {
-      "name": "Play bichradio",
-      "short_name": "Play",
-      "description": "Start playing bichradio ambient radio",
-      "url": "/?action=play",
-      "icons": [
-        {
-          "src": "icon-192.png",
-          "sizes": "192x192"
-        }
-      ]
-    }
-  ],
+  "categories": ["music", "entertainment"],
   "icons": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "form_factor": "narrow"
-    }
+    { "src": "icon-192.png",          "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png",          "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "prefer_related_applications": false
 }
-

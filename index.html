@@ -7,6 +7,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="bichradio" />
   <meta name="theme-color" content="#0a0a0a" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>bichradio</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -303,6 +305,8 @@
       letter-spacing: 0.02em;
     }
 
+    img.pwa-icon { object-fit: cover; }
+
     .pwa-text { flex: 1; }
 
     .pwa-text strong {
@@ -394,7 +398,7 @@
 
 <!-- PWA install banner -->
 <div class="pwa-banner" id="pwa-banner" role="banner" aria-label="Install bichradio">
-  <div class="pwa-icon">br</div>
+  <img class="pwa-icon" src="/apple-touch-icon.png" alt="" />
   <div class="pwa-text">
     <strong>Install bichradio</strong>
     <span class="ios-hint">
@@ -490,6 +494,7 @@
       mcWidget.ready.then(() => {
         mcWidget.events.play.on(() => {
           mcPlaying = true;
+          resumeWanted = false;
           viz.classList.remove('paused');
           setPlayIcon(true);
           setTitle('class · mixcloud');
@@ -497,10 +502,11 @@
           updateMediaSession('class · mixcloud');
         });
         mcWidget.events.pause.on(() => {
+          const src = pauseSource; pauseSource = null;
           mcPlaying = false;
           viz.classList.add('paused');
           setPlayIcon(false);
-          pauseMediaSession();
+          if (src !== 'remote') pauseMediaSession();
         });
         mcWidget.events.ended.on(() => {
           mcPlaying = false;
@@ -552,6 +558,15 @@
   let seekDone      = false;
   let seekTried     = false;
   let seekFromStart = false;
+  let seekTriedTimer = null;
+  let pauseSource   = null;   // 'ui' | 'remote' — who asked the widget to pause
+  let resumeWanted  = false;  // paused by the system (AirPod out, call…) → resume when it asks
+  let silentGuard   = 0;      // ignore silent-loop events that we caused ourselves
+
+  function markPause(src) {
+    pauseSource = src;
+    setTimeout(() => { if (pauseSource === src) pauseSource = null; }, 2000);
+  }
 
   // ── Helpers ──────────────────────────────────────────────
   function active() { return channels[activeId]; }
@@ -609,17 +624,21 @@
 
   function doRandomSeek(w) {
     seekTried = true;
+    // "Track too short" FINISH only fires within seconds of the seek.
+    // Clear the flag afterwards so a natural end is never mistaken for it.
+    clearTimeout(seekTriedTimer);
+    seekTriedTimer = setTimeout(() => { seekTried = false; }, 20000);
     const seekTo = SEEK_MIN + Math.floor(Math.random() * (SEEK_MAX - SEEK_MIN));
     w.seekTo(seekTo);
   }
 
   // ── Reliable play with retry ─────────────────────────────
-  function reliablePlay(w, onConfirmed) {
+  function reliablePlay(w, onConfirmed, maxAttempts = 6) {
     clearInterval(playRetry);
     let attempts = 0;
     const attempt = () => {
       if (isPlaying) { clearInterval(playRetry); playRetry = null; if (onConfirmed) onConfirmed(); return; }
-      if (attempts >= 6) { clearInterval(playRetry); playRetry = null; setStatus('tap play to retry'); return; }
+      if (attempts >= maxAttempts) { clearInterval(playRetry); playRetry = null; setStatus('tap play to retry'); return; }
       attempts++;
       w.play();
     };
@@ -631,6 +650,7 @@
   function playTrack(idx, fromStart = false) {
     seekDone      = false;
     seekTried     = false;
+    clearTimeout(seekTriedTimer);
     seekFromStart = fromStart;
     clearInterval(playRetry);
     const ch = active();
@@ -664,7 +684,7 @@
     if (ch.id === 'class') {
       scReadyTimer = setTimeout(() => {
         if (!ch.ready) onScReadyTimeout();
-      }, 5000);
+      }, 10000);
     }
 
     ch.widget.bind(SC.Widget.Events.READY, () => {
@@ -689,6 +709,7 @@
       }
       if (!isPlaying) {
         isPlaying = true;
+        resumeWanted = false;
         viz.classList.remove('paused');
         setPlayIcon(true);
         acquireWakeLock();
@@ -711,11 +732,14 @@
 
     ch.widget.bind(SC.Widget.Events.PAUSE, () => {
       if (ch.id !== activeId || switching) return;
+      const src = pauseSource; pauseSource = null;
       isPlaying = false;
       viz.classList.add('paused');
       setPlayIcon(false);
-      pauseMediaSession();
       releaseWakeLock();
+      if (src === 'remote') return;           // haltForSystem() already silenced the session
+      if (src !== 'ui') resumeWanted = true;  // paused by something else — let a system "play" resume us
+      pauseMediaSession();
     });
 
     ch.widget.bind(SC.Widget.Events.FINISH, () => {
@@ -756,7 +780,8 @@
       to.widget.setVolume(0);
       activeId   = toId;
       currentIdx = 0;
-      seekDone   = false; seekTried = false;
+      seekDone   = false; seekTried = false; seekFromStart = false;
+      clearTimeout(seekTriedTimer);
       isPlaying  = false;
 
       fadeWidget(from.widget, userVolume, 0, FADE_MS, () => {
@@ -815,16 +840,19 @@
   document.getElementById('btn-play').addEventListener('click', () => {
     if (mcMode) {
       if (!mcWidget) { setStatus('loading Mixcloud…'); return; }
-      if (mcPlaying) mcWidget.pause();
-      else           mcWidget.play();
+      if (mcPlaying) { markPause('ui'); mcWidget.pause(); }
+      else           { resumeWanted = false; mcWidget.play(); }
       return;
     }
     if (switching) return;
     const ch = active();
     if (isPlaying) {
       clearInterval(playRetry);
+      markPause('ui');
+      resumeWanted = false;
       ch.widget.pause();
     } else {
+      resumeWanted = false;
       if (!ch.ready) { setStatus('loading…'); return; }
       ch.widget.setVolume(userVolume);
       playTrack(currentIdx);
@@ -920,9 +948,57 @@
     }
   })();
 
-  // ── Media Session (lock screen / CarPlay) ────────────────
-  // Two silent MP3s claim the media session so CarPlay/lock screen
-  // shows "bichradio" + track title instead of "SoundCloud Widget".
+  // ── Media Session (lock screen / CarPlay / AirPods) ──────
+  // Two silent MP3s claim the media session so the lock screen and CarPlay
+  // show "bichradio" + track title instead of "SoundCloud Widget".
+  //
+  // Pauses are handled differently depending on who asked for them:
+  //   in-app pause button → idle loop takes over (keeps the "bichradio" label)
+  //   system pause        → AirPod removed, call, Siri, lock-screen/CarPlay button:
+  //                         EVERYTHING goes quiet, silent loops included, so iOS
+  //                         sees a paused app and sends "play" when the AirPod is
+  //                         put back — we then resume the same track in place.
+  const IDLE_LABEL = () => new MediaMetadata({
+    title: 'bichradio', artist: 'bichradio', album: 'on air',
+    artwork: [
+      { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
+    ]
+  });
+
+  // Start/stop one of the silent loops. The guard makes the listeners below
+  // ignore events we caused ourselves, so only real system pauses/resumes count.
+  function silent(el, on) {
+    if (!el) return;
+    silentGuard = Date.now() + 600;
+    if (on) el.play().catch(() => {}); else el.pause();
+  }
+
+  // System asked us to pause (AirPod out, call, lock-screen / CarPlay button)
+  function haltForSystem() {
+    if (!isPlaying && !mcPlaying) return;
+    resumeWanted = true;
+    markPause('remote');
+    clearInterval(playRetry);
+    isPlaying = false; mcPlaying = false;
+    viz.classList.add('paused');
+    setPlayIcon(false);
+    releaseWakeLock();
+    if (mcMode) mcWidget?.pause(); else active().widget.pause();
+    suspendMediaSession();
+  }
+
+  // System asked us to play (AirPod back in, call ended, lock-screen / CarPlay button)
+  function resumeFromSystem() {
+    resumeWanted = false;
+    pauseSource  = null;
+    if (silentAudio) { silent(silentAudio.idle, false); silent(silentAudio.active, true); }
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+    if (mcMode) { mcWidget?.play(); return; }
+    active().widget.setVolume(userVolume);
+    reliablePlay(active().widget, null, 12);   // resume in place — never re-skip the track
+  }
+
   const silentAudio = (function() {
     if (!('mediaSession' in navigator)) return null;
 
@@ -942,15 +1018,8 @@
 
     const ch = () => channels[activeId];
 
-    navigator.mediaSession.setActionHandler('play', () => {
-      if (mcMode) { mcWidget?.play(); return; }
-      ch().widget.setVolume(userVolume);
-      reliablePlay(ch().widget);
-    });
-    navigator.mediaSession.setActionHandler('pause', () => {
-      if (mcMode) { mcWidget?.pause(); return; }
-      ch().widget.pause();
-    });
+    navigator.mediaSession.setActionHandler('play',  () => resumeFromSystem());
+    navigator.mediaSession.setActionHandler('pause', () => haltForSystem());
     navigator.mediaSession.setActionHandler('nexttrack', () => {
       if (mcMode) return;
       currentIdx = (currentIdx + 1) % ch().shuffled.length;
@@ -962,25 +1031,29 @@
       playTrack(currentIdx);
     });
 
+    // iOS can also pause / resume our silent loops directly (interruptions,
+    // route changes). Treat that exactly like a system pause / play request.
+    const onSysPause = () => { if (Date.now() >= silentGuard) haltForSystem(); };
+    const onSysPlay  = () => { if (Date.now() >= silentGuard && resumeWanted && !isPlaying) resumeFromSystem(); };
+    [elIdle, elActive].forEach(el => {
+      el.addEventListener('pause', onSysPause);
+      el.addEventListener('play',  onSysPlay);
+    });
+
     document.addEventListener('click', function claimSession() {
-      elIdle.play().catch(() => {});
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: 'bichradio', artist: 'bichradio', album: 'on air',
-        artwork: [
-          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
-        ]
-      });
+      silent(elIdle, true);
+      navigator.mediaSession.metadata = IDLE_LABEL();
       document.removeEventListener('click', claimSession);
     }, { once: true });
 
     return { idle: elIdle, active: elActive };
   })();
 
+  // Music is playing: active loop on, track title on the lock screen
   function updateMediaSession(title) {
     if (!('mediaSession' in navigator) || !silentAudio) return;
-    silentAudio.idle.pause();
-    silentAudio.active.play().catch(() => {});
+    silent(silentAudio.idle, false);
+    silent(silentAudio.active, true);
     navigator.mediaSession.metadata = new MediaMetadata({
       title:  title || 'bichradio',
       artist: 'bichradio',
@@ -993,17 +1066,21 @@
     navigator.mediaSession.playbackState = 'playing';
   }
 
+  // Paused from inside the app (or a gap between tracks): idle loop keeps the "bichradio" label
   function pauseMediaSession() {
     if (!('mediaSession' in navigator) || !silentAudio) return;
-    silentAudio.active.pause();
-    silentAudio.idle.play().catch(() => {});
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: 'bichradio', artist: 'bichradio', album: 'on air',
-      artwork: [
-        { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-        { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
-      ]
-    });
+    silent(silentAudio.active, false);
+    silent(silentAudio.idle, true);
+    navigator.mediaSession.metadata = IDLE_LABEL();
+    navigator.mediaSession.playbackState = 'paused';
+  }
+
+  // Paused by the system: total silence so iOS can auto-resume us
+  function suspendMediaSession() {
+    if (!('mediaSession' in navigator) || !silentAudio) return;
+    silent(silentAudio.active, false);
+    silent(silentAudio.idle, false);
+    navigator.mediaSession.metadata = IDLE_LABEL();
     navigator.mediaSession.playbackState = 'paused';
   }
 
@@ -1067,10 +1144,10 @@
 
         document.getElementById('btn-play').addEventListener('click', function askOnce() {
           document.getElementById('btn-play').removeEventListener('click', askOnce);
-          setTimeout(async () => {
-            const permission = await Notification.requestPermission();
-            if (permission === 'granted') await subscribeToPush(reg);
-          }, 3000);
+          // Must run inside the tap itself — iOS refuses permission prompts from timers.
+          Notification.requestPermission().then(permission => {
+            if (permission === 'granted') subscribeToPush(reg);
+          }).catch(() => {});
         }, { once: true });
       })
       .catch(() => {});
